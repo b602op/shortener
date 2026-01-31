@@ -21,6 +21,10 @@ func MethodPost(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
 		return
 	}
+	if len(body) == 0 {
+		http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
+		return
+	}
 	defer req.Body.Close()
 	//сокращаем url
 	hash := sha256.Sum256([]byte(body))
