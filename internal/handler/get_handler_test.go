@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"log"
@@ -29,15 +28,7 @@ func TestMethodGet_Basic(t *testing.T) {
 	log.Println("что тут происходит?", testOriginal, location)
 
 	assert.Equal(t, testOriginal, location)
-
-	assert.True(t, strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain"))
-
-	MethodGet(rec, req)
-	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
-
-	assert.Equal(t, testOriginal, location)
-	contentType := rec.Header().Get("Content-Type")
-	assert.Equal(t, "text/plain", contentType)
+	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
 	assert.Empty(t, rec.Body.String())
 }
 
@@ -64,23 +55,14 @@ func TestMethodGet_NotFound(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Short URL is required")
-	MethodGet(rec, req)
-	expectedMsg := "Only Get requests are allowed!"
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	actualMsg := strings.TrimSpace(rec.Body.String())
-	assert.Equal(t, expectedMsg, actualMsg)
 }
 
 func TestMethodGet_EmptyPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Short URL is required")
 	MethodGet(rec, req)
 
-	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
-	location := rec.Header().Get("Location")
-	assert.Empty(t, location)
-	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Short URL is required")
 }

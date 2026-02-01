@@ -12,19 +12,12 @@ func MethodGet(res http.ResponseWriter, req *http.Request) {
 	log.Println("Получен GET запрос: ", req.RequestURI)
 
 	if req.Method != http.MethodGet {
-		http.Error(res, "Only Get requests are allowed!", http.StatusBadRequest)
+		http.Error(res, "Short URL is required", http.StatusBadRequest)
 		return
 	}
 
 	// Извлекаем shortID из URL вручную
 	path := strings.Trim(req.URL.Path, "/")
-	if path == "" {
-		res.Header().Set("Location", "")
-		res.Header().Set("Content-Type", "text/plain")
-		res.WriteHeader(http.StatusTemporaryRedirect)
-		return
-	}
-
 	if path == "" {
 		http.Error(res, "Short URL is required", http.StatusBadRequest)
 		return
@@ -37,9 +30,6 @@ func MethodGet(res http.ResponseWriter, req *http.Request) {
 
 	originalURL := repository.SelectData(shortURL)
 	if originalURL == "" {
-		res.Header().Set("Location", "")
-		res.Header().Set("Content-Type", "text/plain")
-		res.WriteHeader(http.StatusTemporaryRedirect)
 		http.Error(res, "Short URL is required", http.StatusBadRequest)
 		return
 	}

@@ -14,6 +14,11 @@ import (
 func MethodPost(res http.ResponseWriter, req *http.Request) {
 	log.Println("Оппа-нифига, иди сюда POST запрос: ", req.RequestURI)
 
+	if req.Method != http.MethodPost {
+		http.Error(res, "Only POST requests are allowed!", http.StatusBadRequest)
+		return
+	}
+
 	defer req.Body.Close()
 
 	body, err := io.ReadAll(req.Body)
@@ -28,7 +33,6 @@ func MethodPost(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
 		return
 	}
-	defer req.Body.Close()
 
 	//сокращаем url
 
