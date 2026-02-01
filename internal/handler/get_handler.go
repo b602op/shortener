@@ -25,7 +25,11 @@ func MethodGet(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Берем первую часть пути как shortID
+	if path == "" {
+		http.Error(res, "Short URL is required", http.StatusBadRequest)
+		return
+	}
+
 	parts := strings.Split(path, "/")
 	shortURL := parts[0]
 
@@ -36,6 +40,7 @@ func MethodGet(res http.ResponseWriter, req *http.Request) {
 		res.Header().Set("Location", "")
 		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusTemporaryRedirect)
+		http.Error(res, "Short URL is required", http.StatusBadRequest)
 		return
 	}
 
