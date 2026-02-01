@@ -13,6 +13,7 @@ func main() {
 	r := handler.Handler()
 
 	log.Println("Запуск сервера на localhost:8080")
+
 	err := http.ListenAndServe(`localhost:8080`, r)
 	if err != nil {
 		log.Println("ошибка запуска сервера: ", err)
