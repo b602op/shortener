@@ -28,6 +28,29 @@ func TestMethodPost_Basic(t *testing.T) {
 	assert.Contains(t, response, req.Host)
 }
 
+func TestMethodPost_WrongMethod(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	MethodPost(rec, req)
+
+	expectedMsg := "Only POST requests are allowed!"
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	actualMsg := strings.TrimSpace(rec.Body.String())
+	assert.Equal(t, expectedMsg, actualMsg)
+}
+
+func TestMethodPost_EmptyBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(""))
+	rec := httptest.NewRecorder()
+
+	MethodPost(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Пустое тело запроса")
+}
+
 func TestMethodPost_LongURL(t *testing.T) {
 	longURL := "https://example.com/" + strings.Repeat("a", 1000)
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(longURL))
