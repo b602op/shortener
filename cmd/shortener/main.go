@@ -4,17 +4,25 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 )
 
 func main() {
-	log.Println("1 шаг запуск сервера на порте 8080, http://localhost")
+	cfg, err := config.New()
+	if err != nil {
+		log.Fatal("ошибка конфигурации: ", err)
+	}
 
-	r := handler.Handler()
+	log.Printf("Конфигурация загружена:")
+	log.Printf("  Адрес сервера: %s", cfg.GetServerAddress())
+	log.Printf("  Базовый URL: %s", cfg.GetBaseURL())
 
-	log.Println("Запуск сервера на localhost:8080")
+	r := handler.Handler(cfg)
 
-	err := http.ListenAndServe(`localhost:8080`, r)
+	log.Printf("Запуск сервера на %s", cfg.GetServerAddress())
+
+	err = http.ListenAndServe(cfg.GetServerAddress(), r)
 	if err != nil {
 		log.Println("ошибка запуска сервера: ", err)
 		panic(err)
