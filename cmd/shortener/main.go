@@ -10,7 +10,7 @@ import (
 func main() {
 	log.Println("1 шаг запуск сервера на порте 8080, http://localhost")
 
-	r := handler.SetupRouter()
+	r := handler.Handler()
 
 	log.Println("Запуск сервера на localhost:8080")
 	err := http.ListenAndServe(`localhost:8080`, r)
