@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMethodPost_Basic проверяет основной сценарий работы
 func TestMethodPost_Basic(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("https://example.com"))
 	rec := httptest.NewRecorder()
@@ -62,4 +62,31 @@ func TestMethodPost_LongURL(t *testing.T) {
 	response := rec.Body.String()
 	assert.True(t, strings.HasPrefix(response, "http://"+req.Host+"/"))
 	assert.Equal(t, 8, len(strings.Split(response, "/")[3]))
+}
+
+func TestMethodPost_ErrorReadingBody(t *testing.T) {
+	failingReader := &failingReadCloser{
+		Reader: bytes.NewBufferString("test"),
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", failingReader)
+
+	rec := httptest.NewRecorder()
+
+	MethodPost(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Ошибка чтения тела")
+}
+
+type failingReadCloser struct {
+	io.Reader
+}
+
+func (f *failingReadCloser) Close() error {
+	return nil
+}
+
+func (f *failingReadCloser) Read(p []byte) (n int, err error) {
+	return 0, io.ErrClosedPipe
 }
