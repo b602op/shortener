@@ -1,8 +1,10 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/b602op/shortener/internal/config"
@@ -10,13 +12,16 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("Ошибка конфигурации: %v", err)
+		slog.Error("Ошибка конфигурации", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Запуск сервера на %s", cfg.GetServerAddress())
-	log.Printf("Базовый URL: %s", cfg.GetBaseURL())
+	slog.Info("Запуск сервера", "address", cfg.GetServerAddress())
+	slog.Info("Базовый URL", "baseURL", cfg.GetBaseURL())
 
 	r := handler.Handler()
 
@@ -29,7 +34,6 @@ func main() {
 	}
 
 	if err := server.ListenAndServe(); err != nil {
-		log.Printf("Ошибка запуска сервера: %v", err)
-		panic(err)
+		panic(fmt.Sprintf("Ошибка запуска сервера: %v", err))
 	}
 }

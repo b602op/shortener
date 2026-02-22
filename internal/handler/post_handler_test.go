@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -34,11 +35,13 @@ func TestMethodPost_WrongMethod(t *testing.T) {
 
 	MethodPost(rec, req)
 
-	expectedMsg := "Only POST requests are allowed!"
+	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	actualMsg := strings.TrimSpace(rec.Body.String())
-	assert.Equal(t, expectedMsg, actualMsg)
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Метод не разрешен", errResp.Error)
 }
 
 func TestMethodPost_EmptyBody(t *testing.T) {
@@ -48,7 +51,12 @@ func TestMethodPost_EmptyBody(t *testing.T) {
 	MethodPost(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Пустое тело запроса")
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Пустое тело запроса", errResp.Error)
 }
 
 func TestMethodPost_LongURL(t *testing.T) {
@@ -76,7 +84,12 @@ func TestMethodPost_ErrorReadingBody(t *testing.T) {
 	MethodPost(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Ошибка чтения тела")
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Ошибка чтения тела", errResp.Error)
 }
 
 type failingReadCloser struct {
