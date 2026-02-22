@@ -15,6 +15,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	cfg, err := config.New()
+
 	if err != nil {
 		slog.Error("Ошибка конфигурации", "error", err)
 		os.Exit(1)
@@ -23,7 +24,7 @@ func main() {
 	slog.Info("Запуск сервера", "address", cfg.GetServerAddress())
 	slog.Info("Базовый URL", "baseURL", cfg.GetBaseURL())
 
-	r := handler.Handler()
+	r := handler.Handler(cfg)
 
 	server := &http.Server{
 		Addr:         cfg.GetServerAddress(),

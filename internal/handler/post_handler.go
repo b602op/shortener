@@ -40,7 +40,7 @@ func MethodPost(cfg *config.Config) http.HandlerFunc {
 		hash := sha256.Sum256([]byte(body))
 		slog.Debug("Хеш", "hash", hex.EncodeToString(hash[:4]))
 
-		shortURL := "http://" + req.Host + "/" + hex.EncodeToString(hash[:4])
+		shortURL := cfg.GetBaseURL() + "/" + hex.EncodeToString(hash[:4])
 
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
