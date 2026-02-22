@@ -3,20 +3,33 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 )
 
 func main() {
-	log.Println("1 шаг запуск сервера на порте 8080, http://localhost")
+	cfg, err := config.New()
+	if err != nil {
+		log.Fatalf("Ошибка конфигурации: %v", err)
+	}
+
+	log.Printf("Запуск сервера на %s", cfg.GetServerAddress())
+	log.Printf("Базовый URL: %s", cfg.GetBaseURL())
 
 	r := handler.Handler()
 
-	log.Println("Запуск сервера на localhost:8080")
+	server := &http.Server{
+		Addr:         cfg.GetServerAddress(),
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
-	err := http.ListenAndServe(`localhost:8080`, r)
-	if err != nil {
-		log.Println("ошибка запуска сервера: ", err)
+	if err := server.ListenAndServe(); err != nil {
+		log.Printf("Ошибка запуска сервера: %v", err)
 		panic(err)
 	}
 }
