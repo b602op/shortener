@@ -33,8 +33,6 @@ func New() (*Config, error) {
 	return config, nil
 }
 
-// getEnvOrFlag возвращает значение переменной окружения, если она установлена,
-// иначе возвращает значение флага
 func getEnvOrFlag(envVar, flagValue string) string {
 	if envValue := os.Getenv(envVar); envValue != "" {
 		return envValue
