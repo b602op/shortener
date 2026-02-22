@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"os"
 )
 
 type Config struct {
@@ -16,9 +17,13 @@ func New() (*Config, error) {
 
 	flag.Parse()
 
+	// Приоритет: переменные окружения → флаги → значения по умолчанию
+	serverAddressValue := getEnvOrFlag("SERVER_ADDRESS", *serverAddress)
+	baseURLValue := getEnvOrFlag("BASE_URL", *baseURL)
+
 	config := &Config{
-		ServerAddress: *serverAddress,
-		BaseURL:       *baseURL,
+		ServerAddress: serverAddressValue,
+		BaseURL:       baseURLValue,
 	}
 
 	if err := config.Validate(); err != nil {
@@ -26,6 +31,13 @@ func New() (*Config, error) {
 	}
 
 	return config, nil
+}
+
+func getEnvOrFlag(envVar, flagValue string) string {
+	if envValue := os.Getenv(envVar); envValue != "" {
+		return envValue
+	}
+	return flagValue
 }
 
 func NewTest() *Config {

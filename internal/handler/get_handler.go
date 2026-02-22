@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -9,28 +9,28 @@ import (
 )
 
 func MethodGet(res http.ResponseWriter, req *http.Request) {
-	log.Println("Получен GET запрос: ", req.RequestURI)
+	slog.Info("Получен GET запрос", "uri", req.RequestURI)
 
 	if req.Method != http.MethodGet {
-		http.Error(res, "Short URL is required", http.StatusBadRequest)
+		respondWithError(res, "Short URL is required", http.StatusBadRequest)
 		return
 	}
 
 	// Извлекаем shortID из URL вручную
 	path := strings.Trim(req.URL.Path, "/")
 	if path == "" {
-		http.Error(res, "Short URL is required", http.StatusBadRequest)
+		respondWithError(res, "Short URL is required", http.StatusBadRequest)
 		return
 	}
 
 	parts := strings.Split(path, "/")
 	shortURL := parts[0]
 
-	log.Println("shortURL: ", shortURL)
+	slog.Debug("shortURL", "shortURL", shortURL)
 
 	originalURL := repository.SelectData(shortURL)
 	if originalURL == "" {
-		http.Error(res, "Short URL is required", http.StatusBadRequest)
+		respondWithError(res, "Short URL not found", http.StatusNotFound)
 		return
 	}
 

@@ -4,10 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
@@ -15,48 +14,41 @@ import (
 
 func MethodPost(cfg *config.Config) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
-		log.Println("Оппа-нифига, иди сюда POST запрос: ", req.RequestURI)
+		slog.Info("Получен POST запрос", "uri", req.RequestURI)
 
 		if req.Method != http.MethodPost {
-			http.Error(res, "Only POST requests are allowed!", http.StatusBadRequest)
+			respondWithError(res, "Метод не разрешен", http.StatusMethodNotAllowed)
 			return
 		}
 
 		defer req.Body.Close()
 
 		body, err := io.ReadAll(req.Body)
-		log.Println("Тело запроса: ", string(body))
+		slog.Debug("Тело запроса", "body", string(body))
 
 		if err != nil {
-			http.Error(res, "Ошибка чтения тела", http.StatusBadRequest)
+			respondWithError(res, "Ошибка чтения тела", http.StatusBadRequest)
 			return
 		}
-		log.Println("Длина тела: ", len(body))
+		slog.Debug("Длина тела", "length", len(body))
 		if len(body) == 0 {
-			http.Error(res, "Пустое тело запроса", http.StatusBadRequest)
+			respondWithError(res, "Пустое тело запроса", http.StatusBadRequest)
 			return
 		}
 
 		//сокращаем url
-
 		hash := sha256.Sum256([]byte(body))
-		shortID := hex.EncodeToString(hash[:4])
-		log.Println("Хеш: ", shortID)
+		slog.Debug("Хеш", "hash", hex.EncodeToString(hash[:4]))
 
-		// Используем базовый URL из конфигурации
-		shortURL := cfg.GetBaseURL()
-		if !strings.HasSuffix(shortURL, "/") {
-			shortURL += "/"
-		}
-		shortURL += shortID
+		shortURL := cfg.GetBaseURL() + "/" + hex.EncodeToString(hash[:4])
 
-		log.Println("Ответ: ", shortURL)
+		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
 		res.Header().Set("content-type", "text/plain")
 		res.Header().Set("Content-Length", strconv.Itoa(len(shortURL)))
 		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))
 
-		repository.InsertData(string(body), shortID)
+		repository.InsertData(string(body), hex.EncodeToString(hash[:4]))
 	}
 }

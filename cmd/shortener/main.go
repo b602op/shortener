@@ -1,30 +1,40 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	cfg, err := config.New()
+
 	if err != nil {
-		log.Fatal("ошибка конфигурации: ", err)
+		slog.Error("Ошибка конфигурации", "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("Конфигурация загружена:")
-	log.Printf("  Адрес сервера: %s", cfg.GetServerAddress())
-	log.Printf("  Базовый URL: %s", cfg.GetBaseURL())
+	slog.Info("Запуск сервера", "address", cfg.GetServerAddress())
+	slog.Info("Базовый URL", "baseURL", cfg.GetBaseURL())
 
 	r := handler.Handler(cfg)
 
-	log.Printf("Запуск сервера на %s", cfg.GetServerAddress())
+	server := &http.Server{
+		Addr:         cfg.GetServerAddress(),
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 
-	err = http.ListenAndServe(cfg.GetServerAddress(), r)
-	if err != nil {
-		log.Println("ошибка запуска сервера: ", err)
-		panic(err)
+	if err := server.ListenAndServe(); err != nil {
+		panic(fmt.Sprintf("Ошибка запуска сервера: %v", err))
 	}
 }

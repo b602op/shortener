@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -41,7 +42,12 @@ func TestMethodGet_WrongMethod(t *testing.T) {
 	log.Println(rec.Body.String(), rec.Code)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Short URL is required")
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Short URL is required", errResp.Error)
 }
 
 func TestMethodGet_NotFound(t *testing.T) {
@@ -53,8 +59,13 @@ func TestMethodGet_NotFound(t *testing.T) {
 
 	log.Println(rec.Body.String())
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Short URL is required")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Short URL not found", errResp.Error)
 }
 
 func TestMethodGet_EmptyPath(t *testing.T) {
@@ -64,5 +75,10 @@ func TestMethodGet_EmptyPath(t *testing.T) {
 	MethodGet(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "Short URL is required")
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+	var errResp ErrorResponse
+	err := json.NewDecoder(rec.Body).Decode(&errResp)
+	require.NoError(t, err)
+	assert.Equal(t, "Short URL is required", errResp.Error)
 }
