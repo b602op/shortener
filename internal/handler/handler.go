@@ -10,6 +10,8 @@ import (
 func Handler(cfg *config.Config) http.Handler {
 	r := chi.NewRouter()
 
+	r.Use(GzipMiddleware)
+
 	r.Post("/", MethodPost(cfg))
 
 	r.Post("/api/shorten", MethodPostAPI(cfg))

@@ -16,7 +16,6 @@ func MethodGet(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Извлекаем shortID из URL вручную
 	path := strings.Trim(req.URL.Path, "/")
 	if path == "" {
 		respondWithError(res, "Short URL is required", http.StatusBadRequest)

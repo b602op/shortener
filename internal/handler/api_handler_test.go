@@ -42,7 +42,6 @@ func TestMethodPostAPI_Basic(t *testing.T) {
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, resp.Result)
 
-	// Проверяем, что URL сохранён в репозитории
 	actualURL := repository.SelectData(expectedHash)
 	assert.Equal(t, testURL, actualURL)
 }

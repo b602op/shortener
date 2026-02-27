@@ -36,7 +36,6 @@ func MethodPost(cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
-		//сокращаем url
 		hash := sha256.Sum256([]byte(body))
 		slog.Debug("Хеш", "hash", hex.EncodeToString(hash[:4]))
 
