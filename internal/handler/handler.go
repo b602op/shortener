@@ -12,6 +12,8 @@ func Handler(cfg *config.Config) http.Handler {
 
 	r.Post("/", MethodPost(cfg))
 
+	r.Post("/api/shorten", MethodPostAPI(cfg))
+
 	r.Get("/{id}", MethodGet)
 
 	return r
