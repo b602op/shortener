@@ -9,6 +9,7 @@ import (
 
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
+	"github.com/b602op/shortener/internal/repository"
 )
 
 func main() {
@@ -21,8 +22,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := repository.InitStorage(cfg.GetFileStoragePath()); err != nil {
+		slog.Warn("Не удалось загрузить данные из файла", "error", err)
+	}
+
 	slog.Info("Запуск сервера", "address", cfg.GetServerAddress())
 	slog.Info("Базовый URL", "baseURL", cfg.GetBaseURL())
+	slog.Info("Путь к файлу хранилища", "file", cfg.GetFileStoragePath())
 
 	r := handler.Handler(cfg)
 
