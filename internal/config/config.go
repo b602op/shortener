@@ -17,7 +17,6 @@ func New() (*Config, error) {
 
 	flag.Parse()
 
-	// Приоритет: переменные окружения → флаги → значения по умолчанию
 	serverAddressValue := getEnvOrFlag("SERVER_ADDRESS", *serverAddress)
 	baseURLValue := getEnvOrFlag("BASE_URL", *baseURL)
 

@@ -18,19 +18,16 @@ func TestNewTest(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
-	// Тест валидации пустого адреса сервера
 	cfg := &Config{ServerAddress: "", BaseURL: "http://example.com"}
 	if err := cfg.Validate(); err == nil {
 		t.Error("Expected validation error for empty server address")
 	}
 
-	// Тест валидации пустого базового URL
 	cfg = &Config{ServerAddress: "localhost:8080", BaseURL: ""}
 	if err := cfg.Validate(); err == nil {
 		t.Error("Expected validation error for empty base URL")
 	}
 
-	// Тест валидной конфигурации
 	cfg = &Config{ServerAddress: "localhost:8080", BaseURL: "http://example.com"}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Expected no validation error, got: %v", err)
@@ -38,7 +35,6 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestGetEnvOrFlag(t *testing.T) {
-	// Тест: переменная окружения установлена
 	os.Setenv("TEST_VAR", "from_env")
 	defer os.Unsetenv("TEST_VAR")
 
@@ -47,7 +43,6 @@ func TestGetEnvOrFlag(t *testing.T) {
 		t.Errorf("getEnvOrFlag with env set = %q, want 'from_env'", result)
 	}
 
-	// Тест: переменная окружения не установлена
 	os.Unsetenv("TEST_VAR")
 	result = getEnvOrFlag("TEST_VAR", "from_flag")
 	if result != "from_flag" {
