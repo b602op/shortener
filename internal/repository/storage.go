@@ -103,9 +103,13 @@ func (s *Storage) Insert(originalURL string, shortURL string) error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.data[shortURL] = record
+	s.mu.Unlock()
+
+	if err := s.Save(); err != nil {
+		return fmt.Errorf("ошибка сохранения: %w", err)
+	}
+
 	return nil
 }
 
