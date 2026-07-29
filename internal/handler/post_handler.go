@@ -9,7 +9,6 @@ import (
 	"strconv"
 
 	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
 )
 
 func MethodPost(cfg *config.Config) http.HandlerFunc {
@@ -48,6 +47,6 @@ func MethodPost(cfg *config.Config) http.HandlerFunc {
 		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))
 
-		repository.InsertData(string(body), hex.EncodeToString(hash[:4]))
+		cfg.GetStorage().Insert(string(body), hex.EncodeToString(hash[:4]))
 	}
 }

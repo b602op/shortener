@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,8 +34,9 @@ func TestMethodPost_Basic(t *testing.T) {
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, rec.Body.String())
 
-	actualURL := repository.SelectData(expectedHash)
-	assert.Equal(t, testURL, actualURL)
+	record, ok := cfg.GetStorage().Select(expectedHash)
+	assert.True(t, ok)
+	assert.Equal(t, testURL, record.OriginalURL)
 }
 
 func TestMethodPost_WrongMethod(t *testing.T) {
@@ -91,8 +91,9 @@ func TestMethodPost_LongURL(t *testing.T) {
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, rec.Body.String())
 
-	actualURL := repository.SelectData(expectedHash)
-	assert.Equal(t, testURL, actualURL)
+	record, ok := cfg.GetStorage().Select(expectedHash)
+	assert.True(t, ok)
+	assert.Equal(t, testURL, record.OriginalURL)
 }
 
 func TestMethodPost_ErrorReadingBody(t *testing.T) {
