@@ -9,7 +9,6 @@ import (
 	"net/http"
 
 	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
 )
 
 type ShortenRequest struct {
@@ -59,7 +58,7 @@ func MethodPostAPI(cfg *config.Config) http.HandlerFunc {
 
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
-		repository.InsertData(shortenReq.URL, shortHash)
+		cfg.GetStorage().Insert(shortenReq.URL, shortHash)
 
 		shortenResp := ShortenResponse{Result: shortURL}
 		respBody, err := json.Marshal(shortenResp)

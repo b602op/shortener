@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+
+	"github.com/b602op/shortener/internal/repository"
 )
 
 const defaultFileStoragePath = "data/storage.json"
@@ -13,6 +15,7 @@ type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	storage         *repository.Storage
 }
 
 func New() (*Config, error) {
@@ -66,7 +69,19 @@ func NewTest() *Config {
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "test_storage.json",
+		storage:         repository.NewStorage(),
 	}
+}
+
+func (c *Config) SetStorage(s *repository.Storage) {
+	c.storage = s
+}
+
+func (c *Config) GetStorage() *repository.Storage {
+	if c.storage == nil {
+		c.storage = repository.NewStorage()
+	}
+	return c.storage
 }
 
 func (c *Config) Validate() error {

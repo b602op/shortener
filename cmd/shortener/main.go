@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +21,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := repository.InitStorage(cfg.GetFileStoragePath()); err != nil {
+	storage := repository.NewStorage()
+
+	if err := storage.Init(cfg.GetFileStoragePath()); err != nil {
 		slog.Warn("Не удалось загрузить данные из файла", "error", err)
 	}
 
@@ -41,6 +42,7 @@ func main() {
 	}
 
 	if err := server.ListenAndServe(); err != nil {
-		panic(fmt.Sprintf("Ошибка запуска сервера: %v", err))
+		slog.Error("Ошибка запуска сервера", "error", err)
+		os.Exit(1)
 	}
 }

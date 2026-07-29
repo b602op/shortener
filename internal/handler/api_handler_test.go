@@ -22,6 +22,9 @@ func TestMethodPostAPI_Basic(t *testing.T) {
 
 	cfg := config.NewTest()
 
+	storage := repository.NewStorage()
+	cfg.SetStorage(storage)
+
 	reqBody := ShortenRequest{URL: testURL}
 	bodyBytes, err := json.Marshal(reqBody)
 	require.NoError(t, err)
@@ -42,8 +45,8 @@ func TestMethodPostAPI_Basic(t *testing.T) {
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, resp.Result)
 
-	actualURL := repository.SelectData(expectedHash)
-	assert.Equal(t, testURL, actualURL)
+	record, _ := storage.Select(expectedHash)
+	assert.Equal(t, testURL, record.OriginalURL)
 }
 
 func TestMethodPostAPI_EmptyBody(t *testing.T) {
