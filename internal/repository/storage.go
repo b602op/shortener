@@ -43,10 +43,16 @@ func (s *Storage) Init(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.filePath = path
+	// ✅ Пробуем определить: если путь существует и это папка
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		s.filePath = filepath.Join(path, "storage.json")
+	} else {
+		// Во всех остальных случаях используем путь как есть
+		s.filePath = path
+	}
 
-	if _, err := os.Stat(path); err == nil {
-		fileData, err := os.ReadFile(path)
+	if _, err := os.Stat(s.filePath); err == nil {
+		fileData, err := os.ReadFile(s.filePath)
 		if err != nil {
 			return fmt.Errorf("ошибка чтения файла: %w", err)
 		}
