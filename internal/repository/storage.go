@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -72,6 +73,11 @@ func (s *Storage) Save() error {
 
 	if s.filePath == "" {
 		return nil
+	}
+
+	dir := filepath.Dir(s.filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("ошибка создания папки: %w", err)
 	}
 
 	records := make([]URLRecord, 0, len(s.data))
