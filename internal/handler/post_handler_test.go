@@ -22,11 +22,12 @@ func TestMethodPost_Basic(t *testing.T) {
 	expectedHash := hex.EncodeToString(hash[:4])
 
 	cfg := config.NewTest()
+	storage := cfg.GetStorage()
 
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg)(rec, req)
+	MethodPost(cfg, storage)(rec, req)
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
@@ -34,19 +35,20 @@ func TestMethodPost_Basic(t *testing.T) {
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, rec.Body.String())
 
-	record, ok := cfg.GetStorage().Select(expectedHash)
+	record, ok := storage.Select(expectedHash)
 	assert.True(t, ok)
 	assert.Equal(t, testURL, record.OriginalURL)
 }
 
 func TestMethodPost_WrongMethod(t *testing.T) {
 	testURL := "https://example.com"
+	cfg := config.NewTest()
+	storage := cfg.GetStorage()
+
 	req := httptest.NewRequest(http.MethodGet, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	cfg := config.NewTest()
-
-	MethodPost(cfg)(rec, req)
+	MethodPost(cfg, storage)(rec, req)
 
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -58,12 +60,13 @@ func TestMethodPost_WrongMethod(t *testing.T) {
 }
 
 func TestMethodPost_EmptyBody(t *testing.T) {
+	cfg := config.NewTest()
+	storage := cfg.GetStorage()
+
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(""))
 	rec := httptest.NewRecorder()
 
-	cfg := config.NewTest()
-
-	MethodPost(cfg)(rec, req)
+	MethodPost(cfg, storage)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -79,19 +82,20 @@ func TestMethodPost_LongURL(t *testing.T) {
 	hash := sha256.Sum256([]byte(testURL))
 	expectedHash := hex.EncodeToString(hash[:4])
 
+	cfg := config.NewTest()
+	storage := cfg.GetStorage()
+
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	cfg := config.NewTest()
-
-	MethodPost(cfg)(rec, req)
+	MethodPost(cfg, storage)(rec, req)
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 
 	expectedShortURL := cfg.GetBaseURL() + "/" + expectedHash
 	assert.Equal(t, expectedShortURL, rec.Body.String())
 
-	record, ok := cfg.GetStorage().Select(expectedHash)
+	record, ok := storage.Select(expectedHash)
 	assert.True(t, ok)
 	assert.Equal(t, testURL, record.OriginalURL)
 }
@@ -101,12 +105,13 @@ func TestMethodPost_ErrorReadingBody(t *testing.T) {
 		Reader: bytes.NewBufferString("test"),
 	}
 
+	cfg := config.NewTest()
+	storage := cfg.GetStorage()
+
 	req := httptest.NewRequest(http.MethodPost, "/", failingReader)
 	rec := httptest.NewRecorder()
 
-	cfg := config.NewTest()
-
-	MethodPost(cfg)(rec, req)
+	MethodPost(cfg, storage)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))

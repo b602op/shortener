@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/b602op/shortener/internal/config"
+	"github.com/b602op/shortener/internal/repository"
 )
 
-func MethodGet(cfg *config.Config) http.HandlerFunc {
+func MethodGet(cfg *config.Config, storage *repository.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос", "uri", req.RequestURI)
 
@@ -28,8 +29,7 @@ func MethodGet(cfg *config.Config) http.HandlerFunc {
 
 		slog.Debug("shortURL", "shortURL", shortURL)
 
-		record, ok := cfg.GetStorage().Select(shortURL)
-
+		record, ok := storage.Select(shortURL)
 		if !ok {
 			respondWithError(res, "Short URL not found", http.StatusNotFound)
 			return

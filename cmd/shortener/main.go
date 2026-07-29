@@ -31,7 +31,7 @@ func main() {
 	slog.Info("Базовый URL", "baseURL", cfg.GetBaseURL())
 	slog.Info("Путь к файлу хранилища", "file", cfg.GetFileStoragePath())
 
-	r := handler.Handler(cfg)
+	r := handler.Handler(cfg, storage)
 
 	server := &http.Server{
 		Addr:         cfg.GetServerAddress(),

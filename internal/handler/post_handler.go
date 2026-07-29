@@ -6,12 +6,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/b602op/shortener/internal/config"
+	"github.com/b602op/shortener/internal/repository"
 )
 
-func MethodPost(cfg *config.Config) http.HandlerFunc {
+func MethodPost(cfg *config.Config, storage *repository.Storage) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос", "uri", req.RequestURI)
 
@@ -23,30 +23,38 @@ func MethodPost(cfg *config.Config) http.HandlerFunc {
 		defer req.Body.Close()
 
 		body, err := io.ReadAll(req.Body)
-		slog.Debug("Тело запроса", "body", string(body))
-
 		if err != nil {
 			respondWithError(res, "Ошибка чтения тела", http.StatusBadRequest)
 			return
 		}
-		slog.Debug("Длина тела", "length", len(body))
+
+		slog.Debug("Тело запроса", "body", string(body))
+
 		if len(body) == 0 {
 			respondWithError(res, "Пустое тело запроса", http.StatusBadRequest)
 			return
 		}
 
-		hash := sha256.Sum256([]byte(body))
-		slog.Debug("Хеш", "hash", hex.EncodeToString(hash[:4]))
+		originalURL := string(body)
 
-		shortURL := cfg.GetBaseURL() + "/" + hex.EncodeToString(hash[:4])
+		// Генерируем короткий URL
+		hash := sha256.Sum256([]byte(originalURL))
+		shortHash := hex.EncodeToString(hash[:4])
+
+		// ✅ Сохраняем только один раз
+		if err := storage.Insert(originalURL, shortHash); err != nil {
+			slog.Error("Ошибка сохранения", "error", err)
+			respondWithError(res, "Failed to save URL", http.StatusInternalServerError)
+			return
+		}
+
+		shortURL := cfg.GetBaseURL() + "/" + shortHash
 
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
-		res.Header().Set("content-type", "text/plain")
-		res.Header().Set("Content-Length", strconv.Itoa(len(shortURL)))
+		// ✅ Отправляем ответ
+		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))
-
-		cfg.GetStorage().Insert(string(body), hex.EncodeToString(hash[:4]))
 	}
 }
