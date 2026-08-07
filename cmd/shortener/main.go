@@ -12,7 +12,7 @@ import (
 	"github.com/b602op/shortener/internal/handler"
 	"github.com/b602op/shortener/internal/repository"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
