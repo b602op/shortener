@@ -15,6 +15,7 @@ type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 	storage         *repository.Storage
 }
 
@@ -22,11 +23,13 @@ func New() (*Config, error) {
 	serverAddress := flag.String("a", "localhost:8080", "адрес запуска HTTP-сервера")
 	baseURL := flag.String("b", "http://localhost:8080", "базовый адрес результирующего сокращённого URL")
 	fileStoragePath := flag.String("f", "", "путь до файла для хранения данных")
+	databaseDSN := flag.String("d", "", "DSN для подключения к PostgreSQL")
 
 	flag.Parse()
 
 	serverAddressValue := getEnvOrFlag("SERVER_ADDRESS", *serverAddress)
 	baseURLValue := getEnvOrFlag("BASE_URL", *baseURL)
+	databaseDSNValue := getEnvOrFlag("DATABASE_DSN", *databaseDSN)
 
 	fileStoragePathValue := getFileStoragePath(*fileStoragePath)
 
@@ -36,6 +39,7 @@ func New() (*Config, error) {
 		ServerAddress:   serverAddressValue,
 		BaseURL:         baseURLValue,
 		FileStoragePath: fileStoragePathValue,
+		DatabaseDSN:     databaseDSNValue,
 	}
 
 	if err := config.Validate(); err != nil {
@@ -69,6 +73,7 @@ func NewTest() *Config {
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "test_storage.json",
+		DatabaseDSN:     "",
 		storage:         repository.NewStorage(),
 	}
 }
@@ -106,4 +111,8 @@ func (c *Config) GetBaseURL() string {
 
 func (c *Config) GetFileStoragePath() string {
 	return c.FileStoragePath
+}
+
+func (c *Config) GetDatabaseDSN() string {
+	return c.DatabaseDSN
 }
