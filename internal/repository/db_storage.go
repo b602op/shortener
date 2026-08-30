@@ -222,35 +222,89 @@ func (s *DBStorage) Insert(originalURL string, shortURL string) error {
 }
 
 // BatchInsert добавляет несколько записей в рамках одной транзакции
-func (s *DBStorage) BatchInsert(records []URLRecord) error {
+// и возвращает результаты в том же порядке с actual short_url
+// (для дубликатов — существующий, для новых — вставленный)
+func (s *DBStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
+	if len(records) == 0 {
+		return []URLRecord{}, nil
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("ошибка начала транзакции: %w", err)
+		return nil, fmt.Errorf("ошибка начала транзакции: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	// Собираем original_url для последующего SELECT
+	originalURLs := make([]string, len(records))
+	for i, record := range records {
+		originalURLs[i] = record.OriginalURL
+	}
+
+	// Вставляем новые записи, дубликаты игнорируем
+	stmt, err := tx.Prepare(
+		"INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (original_url) DO NOTHING",
+	)
 	if err != nil {
-		return fmt.Errorf("ошибка подготовки запроса: %w", err)
+		return nil, fmt.Errorf("ошибка подготовки запроса: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, record := range records {
 		_, err := stmt.Exec(record.ShortURL, record.OriginalURL)
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolationCode {
-				return ErrDuplicateURL
-			}
-			return fmt.Errorf("ошибка вставки записи %s: %w", record.ShortURL, err)
+			return nil, fmt.Errorf("ошибка вставки записи %s: %w", record.ShortURL, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("ошибка фиксации транзакции: %w", err)
+		return nil, fmt.Errorf("ошибка фиксации транзакции: %w", err)
 	}
 
-	return nil
+	// Возвращаем все short_url — и вставленные, и существующие
+	results, err := s.selectByOriginalURLs(originalURLs)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения записей: %w", err)
+	}
+
+	resultMap := make(map[string]URLRecord, len(results))
+	for _, r := range results {
+		resultMap[r.OriginalURL] = r
+	}
+
+	orderedResults := make([]URLRecord, len(records))
+	for i, record := range records {
+		r, ok := resultMap[record.OriginalURL]
+		if !ok {
+			return nil, fmt.Errorf("запись не найдена для original_url: %s", record.OriginalURL)
+		}
+		orderedResults[i] = r
+	}
+
+	return orderedResults, nil
+}
+
+// selectByOriginalURLs возвращает записи по списку original_url
+func (s *DBStorage) selectByOriginalURLs(originalURLs []string) ([]URLRecord, error) {
+	rows, err := s.db.Query(
+		"SELECT short_url, original_url FROM urls WHERE original_url = ANY($1)",
+		originalURLs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка поиска записей: %w", err)
+	}
+	defer rows.Close()
+
+	var results []URLRecord
+	for rows.Next() {
+		var record URLRecord
+		if err := rows.Scan(&record.ShortURL, &record.OriginalURL); err != nil {
+			return nil, fmt.Errorf("ошибка сканирования записи: %w", err)
+		}
+		results = append(results, record)
+	}
+
+	return results, rows.Err()
 }
 
 // Select возвращает оригинальный URL по короткому

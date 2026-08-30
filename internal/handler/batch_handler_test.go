@@ -149,3 +149,51 @@ func TestMethodPostBatchAPI_WrongMethod(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Метод не разрешен", errResp.Error)
 }
+
+func TestMethodPostBatchAPI_DuplicateURL(t *testing.T) {
+	cfg := config.NewTest()
+	storage := repository.NewFileStorage()
+
+	// Сначала создаём URL
+	batchReq1 := []BatchShortenRequest{
+		{OriginalURL: "https://example.com/existing"},
+	}
+	bodyBytes1, _ := json.Marshal(batchReq1)
+	req1 := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewBuffer(bodyBytes1))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	MethodPostBatchAPI(cfg, storage)(rec1, req1)
+	require.Equal(t, http.StatusCreated, rec1.Code)
+
+	var resp1 []BatchShortenResponse
+	json.NewDecoder(rec1.Body).Decode(&resp1)
+	existingShortURL := resp1[0].ShortURL
+
+	// Теперь батч: один новый + один дубликат
+	batchReq2 := []BatchShortenRequest{
+		{OriginalURL: "https://example.com/new"},
+		{OriginalURL: "https://example.com/existing"},
+	}
+	bodyBytes2, _ := json.Marshal(batchReq2)
+	req2 := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", bytes.NewBuffer(bodyBytes2))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+
+	MethodPostBatchAPI(cfg, storage)(rec2, req2)
+
+	// Должен вернуться 201, а не 409
+	require.Equal(t, http.StatusCreated, rec2.Code)
+
+	var resp2 []BatchShortenResponse
+	err := json.NewDecoder(rec2.Body).Decode(&resp2)
+	require.NoError(t, err)
+	require.Len(t, resp2, 2)
+
+	// Дубликат возвращает тот же short_url, что и при первом создании
+	assert.Equal(t, existingShortURL, resp2[1].ShortURL)
+
+	// Новый URL сохранён и имеет корректный формат
+	hash := sha256.Sum256([]byte(batchReq2[0].OriginalURL))
+	expectedHash := hex.EncodeToString(hash[:4])
+	assert.Equal(t, cfg.GetBaseURL()+"/"+expectedHash, resp2[0].ShortURL)
+}
