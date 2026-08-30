@@ -210,6 +210,34 @@ func (s *DBStorage) Insert(originalURL string, shortURL string) error {
 	return nil
 }
 
+// BatchInsert добавляет несколько записей в рамках одной транзакции
+func (s *DBStorage) BatchInsert(records []URLRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ошибка начала транзакции: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT INTO urls (short_url, original_url) VALUES ($1, $2)")
+	if err != nil {
+		return fmt.Errorf("ошибка подготовки запроса: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, record := range records {
+		_, err := stmt.Exec(record.ShortURL, record.OriginalURL)
+		if err != nil {
+			return fmt.Errorf("ошибка вставки записи %s: %w", record.ShortURL, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ошибка фиксации транзакции: %w", err)
+	}
+
+	return nil
+}
+
 // Select возвращает оригинальный URL по короткому
 func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	var record URLRecord
