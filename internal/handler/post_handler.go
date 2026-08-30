@@ -11,7 +11,7 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
-func MethodPost(cfg *config.Config, storage *repository.Storage) http.HandlerFunc {
+func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос", "uri", req.RequestURI)
 
@@ -42,7 +42,7 @@ func MethodPost(cfg *config.Config, storage *repository.Storage) http.HandlerFun
 		shortHash := hex.EncodeToString(hash[:4])
 
 		// ✅ Сохраняем только один раз
-		if err := storage.Insert(originalURL, shortHash); err != nil {
+		if err := store.Insert(originalURL, shortHash); err != nil {
 			slog.Error("Ошибка сохранения", "error", err)
 			respondWithError(res, "Failed to save URL", http.StatusInternalServerError)
 			return
