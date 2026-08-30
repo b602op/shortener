@@ -16,7 +16,7 @@ type Config struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
-	storage         *repository.Storage
+	storage         repository.Store
 }
 
 func New() (*Config, error) {
@@ -33,8 +33,6 @@ func New() (*Config, error) {
 
 	fileStoragePathValue := getFileStoragePath(*fileStoragePath)
 
-	slog.Info("Путь для сохранения данных: ", "fileStoragePath", fileStoragePathValue)
-
 	config := &Config{
 		ServerAddress:   serverAddressValue,
 		BaseURL:         baseURLValue,
@@ -46,7 +44,46 @@ func New() (*Config, error) {
 		return nil, err
 	}
 
+	// Выбираем хранилище: PostgreSQL → файл → память
+	store, err := config.createStore()
+	if err != nil {
+		slog.Warn("Ошибка создания хранилища, используется память", "error", err)
+		config.storage = repository.NewFileStorage()
+	} else {
+		config.storage = store
+	}
+
 	return config, nil
+}
+
+func (c *Config) createStore() (repository.Store, error) {
+	// 1. Пробуем PostgreSQL
+	if c.DatabaseDSN != "" {
+		slog.Info("Используется хранилище PostgreSQL")
+		dbStore, err := repository.NewDBStorage(c.DatabaseDSN)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка создания хранилища PostgreSQL: %w", err)
+		}
+		if err := dbStore.Init(); err != nil {
+			dbStore.Close()
+			return nil, fmt.Errorf("ошибка инициализации хранилища PostgreSQL: %w", err)
+		}
+		return dbStore, nil
+	}
+
+	// 2. Пробуем файл
+	if c.FileStoragePath != "" {
+		slog.Info("Используется файловое хранилище", "path", c.FileStoragePath)
+		fileStore := repository.NewFileStorage()
+		if err := fileStore.Init(c.FileStoragePath); err != nil {
+			return nil, fmt.Errorf("ошибка инициализации файлового хранилища: %w", err)
+		}
+		return fileStore, nil
+	}
+
+	// 3. Память
+	slog.Info("Используется хранилище в памяти")
+	return nil, fmt.Errorf("нет параметров для хранилища")
 }
 
 func getEnvOrFlag(envVar, flagValue string) string {
@@ -74,17 +111,17 @@ func NewTest() *Config {
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "test_storage.json",
 		DatabaseDSN:     "",
-		storage:         repository.NewStorage(),
+		storage:         repository.NewFileStorage(),
 	}
 }
 
-func (c *Config) SetStorage(s *repository.Storage) {
+func (c *Config) SetStorage(s repository.Store) {
 	c.storage = s
 }
 
-func (c *Config) GetStorage() *repository.Storage {
+func (c *Config) GetStorage() repository.Store {
 	if c.storage == nil {
-		c.storage = repository.NewStorage()
+		c.storage = repository.NewFileStorage()
 	}
 	return c.storage
 }

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"database/sql"
 	"net/http"
 
 	"github.com/b602op/shortener/internal/config"
@@ -9,18 +8,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func Handler(cfg *config.Config, storage *repository.Storage, db *sql.DB) http.Handler {
+func Handler(cfg *config.Config, store repository.Store, db interface{}) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(GzipMiddleware)
 
-	// ✅ Передаем storage в обработчики
-	r.Post("/", MethodPost(cfg, storage))
-	r.Post("/api/shorten", MethodPostAPI(cfg, storage))
-	r.Get("/{id}", MethodGet(cfg, storage))
+	// ✅ Передаем store в обработчики
+	r.Post("/", MethodPost(cfg, store))
+	r.Post("/api/shorten", MethodPostAPI(cfg, store))
+	r.Get("/{id}", MethodGet(cfg, store))
 
-	if db != nil {
-		r.Get("/ping", PingHandler(db))
+	// Добавляем /ping если используется PostgreSQL
+	if dbStore, ok := store.(*repository.DBStorage); ok && dbStore.DB() != nil {
+		r.Get("/ping", PingHandler(dbStore.DB()))
 	}
 
 	return r

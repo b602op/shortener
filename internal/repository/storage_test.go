@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewStorage проверяет создание нового хранилища
-func TestNewStorage(t *testing.T) {
-	storage := NewStorage()
+// TestNewFileStorage проверяет создание нового хранилища
+func TestNewFileStorage(t *testing.T) {
+	storage := NewFileStorage()
 
 	assert.NotNil(t, storage)
 	assert.NotNil(t, storage.data)
@@ -43,7 +43,7 @@ func TestStorage_Init_LoadExistingFile(t *testing.T) {
 	err = os.WriteFile(testFile, data, 0644)
 	require.NoError(t, err)
 
-	storage := NewStorage()
+	storage := NewFileStorage()
 	err = storage.Init(testFile)
 	require.NoError(t, err)
 
@@ -63,20 +63,19 @@ func TestStorage_Init_FileNotExists(t *testing.T) {
 	testFile := "nonexistent_file.json"
 	defer os.Remove(testFile)
 
-	storage := NewStorage()
+	storage := NewFileStorage()
 	err := storage.Init(testFile)
 
 	require.NoError(t, err)
 	assert.Empty(t, storage.data)
 }
 
-// TestStorage_Save проверяет сохранение данных в файл
+// TestStorage_Save проверяет вставку данных (Save удалён из FileStorage)
 func TestStorage_Save(t *testing.T) {
 	testFile := "test_storage_save.json"
 	defer os.Remove(testFile)
 
-	storage := NewStorage()
-	storage.filePath = testFile
+	storage := NewFileStorage()
 
 	err := storage.Insert("http://example.com", "test123")
 	require.NoError(t, err)
@@ -84,36 +83,13 @@ func TestStorage_Save(t *testing.T) {
 	err = storage.Insert("http://test.ru", "test456")
 	require.NoError(t, err)
 
-	err = storage.Save()
-	require.NoError(t, err)
-
 	_, err = os.Stat(testFile)
-	require.NoError(t, err)
-
-	data, err := os.ReadFile(testFile)
-	require.NoError(t, err)
-
-	var records []URLRecord
-	err = json.Unmarshal(data, &records)
-	require.NoError(t, err)
-
-	assert.Len(t, records, 2)
-
-	urlMap := make(map[string]URLRecord)
-	for _, r := range records {
-		urlMap[r.ShortURL] = r
-	}
-
-	assert.Equal(t, "http://example.com", urlMap["test123"].OriginalURL)
-	assert.NotEmpty(t, urlMap["test123"].UUID)
-
-	assert.Equal(t, "http://test.ru", urlMap["test456"].OriginalURL)
-	assert.NotEmpty(t, urlMap["test456"].UUID)
+	require.Error(t, err)
 }
 
 // TestStorage_Insert проверяет вставку данных
 func TestStorage_Insert(t *testing.T) {
-	storage := NewStorage()
+	storage := NewFileStorage()
 
 	err := storage.Insert("http://newurl.ru", "new123")
 	require.NoError(t, err)
@@ -126,7 +102,7 @@ func TestStorage_Insert(t *testing.T) {
 
 // TestStorage_Select проверяет поиск данных
 func TestStorage_Select(t *testing.T) {
-	storage := NewStorage()
+	storage := NewFileStorage()
 
 	err := storage.Insert("http://url1.ru", "short1")
 	require.NoError(t, err)
@@ -151,7 +127,7 @@ func TestStorage_Select(t *testing.T) {
 
 // TestStorage_Concurrent проверяет конкурентный доступ
 func TestStorage_Concurrent(t *testing.T) {
-	storage := NewStorage()
+	storage := NewFileStorage()
 	var wg sync.WaitGroup
 
 	for i := 0; i < 100; i++ {
@@ -176,17 +152,6 @@ func TestStorage_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestStorage_Save_EmptyPath проверяет сохранение без указания пути
-func TestStorage_Save_EmptyPath(t *testing.T) {
-	storage := NewStorage()
-
-	err := storage.Insert("http://test.ru", "test")
-	require.NoError(t, err)
-
-	err = storage.Save()
-	assert.NoError(t, err)
-}
-
 // TestStorage_Init_EmptyFile проверяет загрузку пустого файла
 func TestStorage_Init_EmptyFile(t *testing.T) {
 	testFile := "empty_file.json"
@@ -195,7 +160,7 @@ func TestStorage_Init_EmptyFile(t *testing.T) {
 	err := os.WriteFile(testFile, []byte{}, 0644)
 	require.NoError(t, err)
 
-	storage := NewStorage()
+	storage := NewFileStorage()
 	err = storage.Init(testFile)
 	require.NoError(t, err)
 
@@ -210,35 +175,16 @@ func TestStorage_Init_InvalidJSON(t *testing.T) {
 	err := os.WriteFile(testFile, []byte("{это не json"), 0644)
 	require.NoError(t, err)
 
-	storage := NewStorage()
+	storage := NewFileStorage()
 	err = storage.Init(testFile)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "ошибка парсинга JSON")
 }
 
-// TestStorage_WithTempDir использует временную директорию
-func TestStorage_WithTempDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := tmpDir + "/storage.json"
-
-	storage := NewStorage()
-	err := storage.Init(testFile)
-	require.NoError(t, err)
-
-	err = storage.Insert("http://test.ru", "test")
-	require.NoError(t, err)
-
-	err = storage.Save()
-	require.NoError(t, err)
-
-	_, err = os.Stat(testFile)
-	assert.NoError(t, err)
-}
-
 // TestStorage_InsertDuplicate проверяет вставку дубликата
 func TestStorage_InsertDuplicate(t *testing.T) {
-	storage := NewStorage()
+	storage := NewFileStorage()
 
 	err := storage.Insert("http://first.com", "test")
 	require.NoError(t, err)

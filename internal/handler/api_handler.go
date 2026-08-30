@@ -20,7 +20,7 @@ type ShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func MethodPostAPI(cfg *config.Config, storage *repository.Storage) http.HandlerFunc {
+func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос к API", "uri", req.RequestURI)
 
@@ -57,8 +57,8 @@ func MethodPostAPI(cfg *config.Config, storage *repository.Storage) http.Handler
 
 		shortURL := cfg.GetBaseURL() + "/" + shortHash
 
-		// ✅ Сохраняем через переданный storage
-		if err := storage.Insert(shortenReq.URL, shortHash); err != nil {
+		// ✅ Сохраняем через переданный store
+		if err := store.Insert(shortenReq.URL, shortHash); err != nil {
 			slog.Error("Ошибка сохранения", "error", err)
 			respondWithError(res, "Ошибка сохранения URL", http.StatusInternalServerError)
 			return

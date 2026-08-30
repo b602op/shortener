@@ -21,7 +21,7 @@ func TestMethodPostAPI_Basic(t *testing.T) {
 	expectedHash := hex.EncodeToString(hash[:4])
 
 	cfg := config.NewTest()
-	storage := repository.NewStorage()
+	storage := repository.NewFileStorage()
 
 	reqBody := ShortenRequest{URL: testURL}
 	bodyBytes, err := json.Marshal(reqBody)
@@ -68,7 +68,7 @@ func TestMethodPostAPI_EmptyBody(t *testing.T) {
 
 func TestMethodPostAPI_EmptyURL(t *testing.T) {
 	cfg := config.NewTest()
-	storage := repository.NewStorage()
+	storage := repository.NewFileStorage()
 
 	reqBody := ShortenRequest{URL: ""}
 	bodyBytes, _ := json.Marshal(reqBody)

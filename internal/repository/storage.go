@@ -9,22 +9,29 @@ import (
 	"sync"
 )
 
+// URLRecord — структура записи URL
 type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 }
 
-// Storage — инкапсулированное хранилище с потокобезопасным доступом
-type Storage struct {
+// Store — интерфейс хранилища URL
+type Store interface {
+	Insert(originalURL string, shortURL string) error
+	Select(shortURL string) (URLRecord, bool)
+}
+
+// FileStorage — хранение в памяти с опциональной записью в файл
+type FileStorage struct {
 	mu       sync.Mutex
 	data     map[string]URLRecord
 	filePath string
 }
 
-// NewStorage создаёт новое хранилище
-func NewStorage() *Storage {
-	return &Storage{
+// NewFileStorage создаёт новое файловое хранилище
+func NewFileStorage() *FileStorage {
+	return &FileStorage{
 		data: make(map[string]URLRecord),
 	}
 }
@@ -39,11 +46,11 @@ func generateUUID() string {
 }
 
 // Init инициализирует хранилище, загружая данные из файла
-func (s *Storage) Init(path string) error {
+func (s *FileStorage) Init(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// ✅ Пробуем определить: если путь существует и это папка
+	// Пробуем определить: если путь существует и это папка
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		s.filePath = filepath.Join(path, "storage.json")
 	} else {
@@ -72,11 +79,24 @@ func (s *Storage) Init(path string) error {
 	return nil
 }
 
-// Save сохраняет данные в файл
-func (s *Storage) Save() error {
+// Insert добавляет запись в хранилище
+func (s *FileStorage) Insert(originalURL string, shortURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	uuid := generateUUID()
+
+	s.data[shortURL] = URLRecord{
+		UUID:        uuid,
+		ShortURL:    shortURL,
+		OriginalURL: originalURL,
+	}
+
+	return s.saveFile()
+}
+
+// saveFile сохраняет данные в файл
+func (s *FileStorage) saveFile() error {
 	if s.filePath == "" {
 		return nil
 	}
@@ -87,7 +107,7 @@ func (s *Storage) Save() error {
 	}
 
 	records := make([]URLRecord, 0, len(s.data))
-	for _, record := range s.data { // ✅ берем готовые записи
+	for _, record := range s.data {
 		records = append(records, record)
 	}
 
@@ -103,30 +123,21 @@ func (s *Storage) Save() error {
 	return nil
 }
 
-// Insert генерирует UUID автоматически
-func (s *Storage) Insert(originalURL string, shortURL string) error {
-	// Генерируем UUID
-	uuid := generateUUID()
-
-	record := URLRecord{
-		UUID:        uuid,
-		ShortURL:    shortURL,
-		OriginalURL: originalURL,
-	}
-
+// Save сохраняет данные в файл
+func (s *FileStorage) Save() error {
 	s.mu.Lock()
-	s.data[shortURL] = record
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 
-	if err := s.Save(); err != nil {
-		return fmt.Errorf("ошибка сохранения: %w", err)
-	}
+	return s.saveFile()
+}
 
-	return nil
+// Close сохраняет данные и закрывает хранилище
+func (s *FileStorage) Close() error {
+	return s.Save()
 }
 
 // Select возвращает оригинальный URL по короткому
-func (s *Storage) Select(shortURL string) (URLRecord, bool) {
+func (s *FileStorage) Select(shortURL string) (URLRecord, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
