@@ -13,9 +13,10 @@ func Handler(cfg *config.Config, store repository.Store, db interface{}) http.Ha
 
 	r.Use(GzipMiddleware)
 
-	// ✅ Передаем store в обработчики
+	// Передаем store в обработчики
 	r.Post("/", MethodPost(cfg, store))
 	r.Post("/api/shorten", MethodPostAPI(cfg, store))
+	r.Post("/api/shorten/batch", MethodPostBatchAPI(cfg, store))
 	r.Get("/{id}", MethodGet(cfg, store))
 
 	// Добавляем /ping если используется PostgreSQL

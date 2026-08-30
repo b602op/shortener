@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -57,8 +58,15 @@ func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc 
 
 		shortURL := cfg.GetBaseURL() + "/" + shortHash
 
-		// ✅ Сохраняем через переданный store
+		// Сохраняем через переданный store
 		if err := store.Insert(shortenReq.URL, shortHash); err != nil {
+			if errors.Is(err, repository.ErrDuplicateURL) {
+				slog.Warn("Дубликат URL", "url", shortenReq.URL)
+				res.Header().Set("Content-Type", "application/json")
+				res.WriteHeader(http.StatusConflict)
+				json.NewEncoder(res).Encode(ShortenResponse{Result: cfg.GetBaseURL() + "/" + shortHash})
+				return
+			}
 			slog.Error("Ошибка сохранения", "error", err)
 			respondWithError(res, "Ошибка сохранения URL", http.StatusInternalServerError)
 			return

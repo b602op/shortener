@@ -19,6 +19,7 @@ type URLRecord struct {
 // Store — интерфейс хранилища URL
 type Store interface {
 	Insert(originalURL string, shortURL string) error
+	BatchInsert(records []URLRecord) error
 	Select(shortURL string) (URLRecord, bool)
 }
 
@@ -84,12 +85,43 @@ func (s *FileStorage) Insert(originalURL string, shortURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Проверяем наличие дубликата по original_url
+	for _, record := range s.data {
+		if record.OriginalURL == originalURL {
+			return ErrDuplicateURL
+		}
+	}
+
 	uuid := generateUUID()
 
 	s.data[shortURL] = URLRecord{
 		UUID:        uuid,
 		ShortURL:    shortURL,
 		OriginalURL: originalURL,
+	}
+
+	return s.saveFile()
+}
+
+// BatchInsert добавляет несколько записей в хранилище
+func (s *FileStorage) BatchInsert(records []URLRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, record := range records {
+		// Проверяем наличие дубликата по original_url
+		for _, existing := range s.data {
+			if existing.OriginalURL == record.OriginalURL {
+				return ErrDuplicateURL
+			}
+		}
+
+		uuid := generateUUID()
+		s.data[record.ShortURL] = URLRecord{
+			UUID:        uuid,
+			ShortURL:    record.ShortURL,
+			OriginalURL: record.OriginalURL,
+		}
 	}
 
 	return s.saveFile()
