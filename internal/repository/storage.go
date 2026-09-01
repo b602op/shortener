@@ -19,21 +19,23 @@ type URLRecord struct {
 // Store — интерфейс хранилища URL
 type Store interface {
 	Insert(originalURL string, shortURL string) error
-	BatchInsert(records []URLRecord) error
+	BatchInsert(records []URLRecord) ([]URLRecord, error)
 	Select(shortURL string) (URLRecord, bool)
 }
 
 // FileStorage — хранение в памяти с опциональной записью в файл
 type FileStorage struct {
-	mu       sync.Mutex
-	data     map[string]URLRecord
-	filePath string
+	mu            sync.Mutex
+	data          map[string]URLRecord // shortURL -> record
+	originalIndex map[string]URLRecord // originalURL -> record (обратный индекс для O(1) поиска дубликатов)
+	filePath      string
 }
 
 // NewFileStorage создаёт новое файловое хранилище
 func NewFileStorage() *FileStorage {
 	return &FileStorage{
-		data: make(map[string]URLRecord),
+		data:          make(map[string]URLRecord),
+		originalIndex: make(map[string]URLRecord),
 	}
 }
 
@@ -73,6 +75,7 @@ func (s *FileStorage) Init(path string) error {
 
 			for _, record := range records {
 				s.data[record.ShortURL] = record
+				s.originalIndex[record.OriginalURL] = record
 			}
 		}
 	}
@@ -85,32 +88,54 @@ func (s *FileStorage) Insert(originalURL string, shortURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Проверяем наличие дубликата по original_url через обратный индекс
+	if _, ok := s.originalIndex[originalURL]; ok {
+		return ErrDuplicateURL
+	}
+
 	uuid := generateUUID()
 
-	s.data[shortURL] = URLRecord{
+	record := URLRecord{
 		UUID:        uuid,
 		ShortURL:    shortURL,
 		OriginalURL: originalURL,
 	}
+	s.data[shortURL] = record
+	s.originalIndex[originalURL] = record
 
 	return s.saveFile()
 }
 
-// BatchInsert добавляет несколько записей в хранилище
-func (s *FileStorage) BatchInsert(records []URLRecord) error {
+// BatchInsert добавляет несколько записей в хранилище и возвращает результаты
+// с actual short_url (для дубликатов — существующий, для новых — вставленный)
+func (s *FileStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for _, record := range records {
+	results := make([]URLRecord, len(records))
+
+	for i, record := range records {
+		// Проверяем наличие дубликата по original_url через обратный индекс
+		if existing, ok := s.originalIndex[record.OriginalURL]; ok {
+			results[i] = existing
+			continue
+		}
+
 		uuid := generateUUID()
-		s.data[record.ShortURL] = URLRecord{
+		entry := URLRecord{
 			UUID:        uuid,
+			ShortURL:    record.ShortURL,
+			OriginalURL: record.OriginalURL,
+		}
+		s.data[record.ShortURL] = entry
+		s.originalIndex[record.OriginalURL] = entry
+		results[i] = URLRecord{
 			ShortURL:    record.ShortURL,
 			OriginalURL: record.OriginalURL,
 		}
 	}
 
-	return s.saveFile()
+	return results, s.saveFile()
 }
 
 // saveFile сохраняет данные в файл

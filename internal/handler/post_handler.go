@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -41,8 +42,15 @@ func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 		hash := sha256.Sum256([]byte(originalURL))
 		shortHash := hex.EncodeToString(hash[:4])
 
-		// ✅ Сохраняем только один раз
+		// Сохраняем только один раз
 		if err := store.Insert(originalURL, shortHash); err != nil {
+			if errors.Is(err, repository.ErrDuplicateURL) {
+				slog.Warn("Дубликат URL", "url", originalURL)
+				res.Header().Set("Content-Type", "text/plain")
+				res.WriteHeader(http.StatusConflict)
+				res.Write([]byte(cfg.GetBaseURL() + "/" + shortHash))
+				return
+			}
 			slog.Error("Ошибка сохранения", "error", err)
 			respondWithError(res, "Failed to save URL", http.StatusInternalServerError)
 			return
@@ -52,7 +60,7 @@ func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
-		// ✅ Отправляем ответ
+		// Отправляем ответ
 		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusCreated)
 		res.Write([]byte(shortURL))

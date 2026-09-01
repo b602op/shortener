@@ -95,16 +95,31 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 		}
 
 		// Сохраняем все записи через BatchInsert
-		if err := store.BatchInsert(records); err != nil {
+		results, err := store.BatchInsert(records)
+		if err != nil {
 			slog.Error("Ошибка сохранения батча", "error", err)
 			respondWithError(res, "Ошибка сохранения URL", http.StatusInternalServerError)
 			return
 		}
 
-		// Формируем ответ
-		responses := make([]BatchShortenResponse, len(batchEntries))
-		for i, entry := range batchEntries {
-			responses[i] = entry.resp
+		// Строим map original_url -> short_url (хеш) из результатов
+		actualShortHashes := make(map[string]string, len(results))
+		for _, r := range results {
+			actualShortHashes[r.OriginalURL] = r.ShortURL
+		}
+
+		// Формируем ответ с полными short_url
+		responses := make([]BatchShortenResponse, len(batchReq))
+		for i, item := range batchReq {
+			shortHash := actualShortHashes[item.OriginalURL]
+			if shortHash == "" {
+				// На случай, если запись не нашлась (не должно происходить)
+				shortHash = batchEntries[i].record.ShortURL
+			}
+			responses[i] = BatchShortenResponse{
+				CorrelationID: item.CorrelationID,
+				ShortURL:      cfg.GetBaseURL() + "/" + shortHash,
+			}
 		}
 
 		respBody, err := json.Marshal(responses)
