@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 )
@@ -58,8 +59,11 @@ func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc 
 
 		shortURL := cfg.GetBaseURL() + "/" + shortHash
 
+		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
+		userID, _ := auth.GetUserIDFromContext(req.Context())
+
 		// Сохраняем через переданный store
-		if err := store.Insert(shortenReq.URL, shortHash); err != nil {
+		if err := store.Insert(userID, shortenReq.URL, shortHash); err != nil {
 			if errors.Is(err, repository.ErrDuplicateURL) {
 				slog.Warn("Дубликат URL", "url", shortenReq.URL)
 				res.Header().Set("Content-Type", "application/json")

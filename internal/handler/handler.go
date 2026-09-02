@@ -3,20 +3,23 @@ package handler
 import (
 	"net/http"
 
+	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
-func Handler(cfg *config.Config, store repository.Store, db interface{}) http.Handler {
+func Handler(cfg *config.Config, store repository.Store, authService *auth.Service) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(GzipMiddleware)
+	r.Use(AuthMiddleware(authService))
 
 	// Передаем store в обработчики
 	r.Post("/", MethodPost(cfg, store))
 	r.Post("/api/shorten", MethodPostAPI(cfg, store))
 	r.Post("/api/shorten/batch", MethodPostBatchAPI(cfg, store))
+	r.Get("/api/user/urls", MethodGetUserURLs(cfg, store, authService))
 	r.Get("/{id}", MethodGet(cfg, store))
 
 	// Добавляем /ping если используется PostgreSQL

@@ -8,10 +8,18 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 	"github.com/b602op/shortener/internal/repository"
 )
+
+func getSecretKey() string {
+	if key := os.Getenv("AUTH_SECRET_KEY"); key != "" {
+		return key
+	}
+	return "super-secret-key-change-me"
+}
 
 func main() {
 	cfg, err := config.New()
@@ -37,7 +45,9 @@ func main() {
 	log.Printf("Сервер запускается на %s", addr)
 	log.Printf("Базовый URL: %s", baseURL)
 
-	httpHandler := handler.Handler(cfg, store, nil)
+	authService := auth.NewService(getSecretKey())
+
+	httpHandler := handler.Handler(cfg, store, authService)
 
 	server := &http.Server{
 		Addr:    addr,

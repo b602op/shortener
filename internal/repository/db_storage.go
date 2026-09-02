@@ -206,10 +206,10 @@ func splitStatements(sql string) []string {
 }
 
 // Insert добавляет запись в базу данных
-func (s *DBStorage) Insert(originalURL string, shortURL string) error {
+func (s *DBStorage) Insert(userID string, originalURL string, shortURL string) error {
 	_, err := s.db.Exec(
-		"INSERT INTO urls (short_url, original_url) VALUES ($1, $2)",
-		shortURL, originalURL,
+		"INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)",
+		shortURL, originalURL, userID,
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -224,7 +224,7 @@ func (s *DBStorage) Insert(originalURL string, shortURL string) error {
 // BatchInsert добавляет несколько записей в рамках одной транзакции
 // и возвращает результаты в том же порядке с actual short_url
 // (для дубликатов — существующий, для новых — вставленный)
-func (s *DBStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
+func (s *DBStorage) BatchInsert(userID string, records []URLRecord) ([]URLRecord, error) {
 	if len(records) == 0 {
 		return []URLRecord{}, nil
 	}
@@ -243,7 +243,7 @@ func (s *DBStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
 
 	// Вставляем новые записи, дубликаты игнорируем
 	stmt, err := tx.Prepare(
-		"INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (original_url) DO NOTHING",
+		"INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3) ON CONFLICT (original_url) DO NOTHING",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка подготовки запроса: %w", err)
@@ -251,7 +251,7 @@ func (s *DBStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
 	defer stmt.Close()
 
 	for _, record := range records {
-		_, err := stmt.Exec(record.ShortURL, record.OriginalURL)
+		_, err := stmt.Exec(record.ShortURL, record.OriginalURL, userID)
 		if err != nil {
 			return nil, fmt.Errorf("ошибка вставки записи %s: %w", record.ShortURL, err)
 		}
@@ -323,6 +323,33 @@ func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	}
 
 	return record, true
+}
+
+// SelectByUser возвращает все URL, сокращённые указанным пользователем
+func (s *DBStorage) SelectByUser(userID string) []URLRecord {
+	rows, err := s.db.Query(
+		"SELECT short_url, original_url FROM urls WHERE user_id = $1",
+		userID,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var results []URLRecord
+	for rows.Next() {
+		var record URLRecord
+		if err := rows.Scan(&record.ShortURL, &record.OriginalURL); err != nil {
+			continue
+		}
+		results = append(results, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil
+	}
+
+	return results
 }
 
 // Close закрывает подключение к базе данных
