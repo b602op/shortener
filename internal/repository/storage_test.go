@@ -77,10 +77,10 @@ func TestStorage_Save(t *testing.T) {
 
 	storage := NewFileStorage()
 
-	err := storage.Insert("http://example.com", "test123")
+	err := storage.Insert("", "http://example.com", "test123")
 	require.NoError(t, err)
 
-	err = storage.Insert("http://test.ru", "test456")
+	err = storage.Insert("", "http://test.ru", "test456")
 	require.NoError(t, err)
 
 	_, err = os.Stat(testFile)
@@ -91,7 +91,7 @@ func TestStorage_Save(t *testing.T) {
 func TestStorage_Insert(t *testing.T) {
 	storage := NewFileStorage()
 
-	err := storage.Insert("http://newurl.ru", "new123")
+	err := storage.Insert("", "http://newurl.ru", "new123")
 	require.NoError(t, err)
 
 	found, ok := storage.Select("new123")
@@ -104,10 +104,10 @@ func TestStorage_Insert(t *testing.T) {
 func TestStorage_Select(t *testing.T) {
 	storage := NewFileStorage()
 
-	err := storage.Insert("http://url1.ru", "short1")
+	err := storage.Insert("", "http://url1.ru", "short1")
 	require.NoError(t, err)
 
-	err = storage.Insert("http://url2.ru", "short2")
+	err = storage.Insert("", "http://url2.ru", "short2")
 	require.NoError(t, err)
 
 	record1, ok := storage.Select("short1")
@@ -136,7 +136,7 @@ func TestStorage_Concurrent(t *testing.T) {
 			defer wg.Done()
 			url := "http://url-" + string(rune(i+65)) + ".ru"
 			short := "short-" + string(rune(i+65))
-			_ = storage.Insert(url, short)
+			_ = storage.Insert("", url, short)
 		}(i)
 	}
 
@@ -186,10 +186,10 @@ func TestStorage_Init_InvalidJSON(t *testing.T) {
 func TestStorage_InsertDuplicate(t *testing.T) {
 	storage := NewFileStorage()
 
-	err := storage.Insert("http://first.com", "test")
+	err := storage.Insert("", "http://first.com", "test")
 	require.NoError(t, err)
 
-	err = storage.Insert("http://second.com", "test")
+	err = storage.Insert("", "http://second.com", "test")
 	require.NoError(t, err)
 
 	found, ok := storage.Select("test")

@@ -14,13 +14,15 @@ type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id,omitempty"`
 }
 
 // Store — интерфейс хранилища URL
 type Store interface {
-	Insert(originalURL string, shortURL string) error
-	BatchInsert(records []URLRecord) ([]URLRecord, error)
+	Insert(userID string, originalURL string, shortURL string) error
+	BatchInsert(userID string, records []URLRecord) ([]URLRecord, error)
 	Select(shortURL string) (URLRecord, bool)
+	SelectByUser(userID string) []URLRecord
 }
 
 // FileStorage — хранение в памяти с опциональной записью в файл
@@ -84,7 +86,7 @@ func (s *FileStorage) Init(path string) error {
 }
 
 // Insert добавляет запись в хранилище
-func (s *FileStorage) Insert(originalURL string, shortURL string) error {
+func (s *FileStorage) Insert(userID string, originalURL string, shortURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,6 +101,7 @@ func (s *FileStorage) Insert(originalURL string, shortURL string) error {
 		UUID:        uuid,
 		ShortURL:    shortURL,
 		OriginalURL: originalURL,
+		UserID:      userID,
 	}
 	s.data[shortURL] = record
 	s.originalIndex[originalURL] = record
@@ -108,7 +111,7 @@ func (s *FileStorage) Insert(originalURL string, shortURL string) error {
 
 // BatchInsert добавляет несколько записей в хранилище и возвращает результаты
 // с actual short_url (для дубликатов — существующий, для новых — вставленный)
-func (s *FileStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
+func (s *FileStorage) BatchInsert(userID string, records []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -126,6 +129,7 @@ func (s *FileStorage) BatchInsert(records []URLRecord) ([]URLRecord, error) {
 			UUID:        uuid,
 			ShortURL:    record.ShortURL,
 			OriginalURL: record.OriginalURL,
+			UserID:      userID,
 		}
 		s.data[record.ShortURL] = entry
 		s.originalIndex[record.OriginalURL] = entry
@@ -186,4 +190,19 @@ func (s *FileStorage) Select(shortURL string) (URLRecord, bool) {
 
 	record, ok := s.data[shortURL]
 	return record, ok
+}
+
+// SelectByUser возвращает все URL, сокращённые указанным пользователем
+func (s *FileStorage) SelectByUser(userID string) []URLRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	records := make([]URLRecord, 0)
+	for _, record := range s.data {
+		if record.UserID == userID {
+			records = append(records, record)
+		}
+	}
+
+	return records
 }

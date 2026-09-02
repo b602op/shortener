@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 )
@@ -94,8 +95,11 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 			records[i] = entry.record
 		}
 
+		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
+		userID, _ := auth.GetUserIDFromContext(req.Context())
+
 		// Сохраняем все записи через BatchInsert
-		results, err := store.BatchInsert(records)
+		results, err := store.BatchInsert(userID, records)
 		if err != nil {
 			slog.Error("Ошибка сохранения батча", "error", err)
 			respondWithError(res, "Ошибка сохранения URL", http.StatusInternalServerError)

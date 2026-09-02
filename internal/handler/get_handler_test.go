@@ -19,7 +19,7 @@ func TestMethodGet_Basic(t *testing.T) {
 	testOriginal := "https://example.com/very/long/url"
 
 	storage := repository.NewFileStorage()
-	storage.Insert(testOriginal, testShort)
+	storage.Insert("", testOriginal, testShort)
 
 	cfg := config.NewTest()
 
