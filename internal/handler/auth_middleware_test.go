@@ -88,7 +88,7 @@ func TestAuthMiddleware_KeepsValidCookie(t *testing.T) {
 	assert.Equal(t, ctxUserID, expectedUserID)
 }
 
-func TestAuthMiddleware_ReissuesInvalidCookie(t *testing.T) {
+func TestAuthMiddleware_RejectsInvalidCookie(t *testing.T) {
 	authService := auth.NewService("test-secret")
 	middleware := AuthMiddleware(authService)
 
@@ -104,20 +104,9 @@ func TestAuthMiddleware_ReissuesInvalidCookie(t *testing.T) {
 
 	middleware(next).ServeHTTP(rec, req)
 
-	// Закрываем тело ответа
-	resp := rec.Result()
-	defer resp.Body.Close()
-
-	// Кука с неверной подписью должна быть заменена на новую
-	cookies := resp.Cookies()
-	require.Len(t, cookies, 1)
-
-	require.NotEmpty(t, ctxUserID, "userID должен быть установлен в контексте")
-
-	newUserID, err := authService.Verify(cookies[0].Value)
-	require.NoError(t, err)
-	assert.NotEqual(t, "tampered.signature", cookies[0].Value)
-	assert.Equal(t, ctxUserID, newUserID)
+	// Кука есть, но невалидная — middleware должен вернуть 401
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Empty(t, ctxUserID, "userID не должен попасть в контекст")
 }
 
 func TestAuthMiddleware_RejectsForeignSignedCookie(t *testing.T) {
@@ -134,19 +123,12 @@ func TestAuthMiddleware_RejectsForeignSignedCookie(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: foreignToken})
 	rec := httptest.NewRecorder()
 
-	middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req)
+	middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, req)
 
-	// Закрываем тело ответа
-	resp := rec.Result()
-	defer resp.Body.Close()
-
-	// Должна быть выдана новая кука (с нашим секретом)
-	cookies := resp.Cookies()
-	require.Len(t, cookies, 1)
-
-	// Проверяем, что новая кука валидна
-	_, err = authService.Verify(cookies[0].Value)
-	assert.NoError(t, err, "должна быть выдана новая валидная кука")
+	// Кука подписана чужим ключом — middleware должен отвергнуть запрос
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestUserIDFromContext_Missing(t *testing.T) {

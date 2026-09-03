@@ -35,6 +35,12 @@ func MethodGet(cfg *config.Config, store repository.Store) http.HandlerFunc {
 			return
 		}
 
+		// URL помечен удалённым его создателем
+		if record.DeletedFlag {
+			res.WriteHeader(http.StatusGone)
+			return
+		}
+
 		res.Header().Set("Location", record.OriginalURL)
 		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusTemporaryRedirect)

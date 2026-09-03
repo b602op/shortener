@@ -20,7 +20,7 @@ type userURLResponse struct {
 // 401 — если кука присутствует, но не содержит валидный ID пользователя.
 // 204 — если пользователь ещё не сокращал URL.
 // 200 — список сокращённых URL в формате JSON.
-func MethodGetUserURLs(cfg *config.Config, store repository.Store, authService *auth.Service) http.HandlerFunc {
+func MethodGetUserURLs(cfg *config.Config, store repository.Store, authService UserIDProvider) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос к API", "uri", req.RequestURI)
 

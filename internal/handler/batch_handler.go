@@ -35,7 +35,6 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 		}
 
 		res.Header().Set("Content-Type", "application/json")
-
 		defer req.Body.Close()
 
 		body, err := io.ReadAll(req.Body)
@@ -56,14 +55,7 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 			return
 		}
 
-		// Генерируем short URLs и подготавливаем записи
-		type batchEntry struct {
-			record repository.URLRecord
-			resp   BatchShortenResponse
-		}
-
-		batchEntries := make([]batchEntry, 0, len(batchReq))
-
+		records := make([]repository.URLRecord, 0, len(batchReq))
 		for _, item := range batchReq {
 			if item.OriginalURL == "" {
 				respondWithError(res, "URL не может быть пустым", http.StatusBadRequest)
@@ -71,28 +63,10 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 			}
 
 			hash := sha256.Sum256([]byte(item.OriginalURL))
-			shortHash := hex.EncodeToString(hash[:4])
-
-			shortURL := cfg.GetBaseURL() + "/" + shortHash
-
-			batchEntries = append(batchEntries, batchEntry{
-				record: repository.URLRecord{
-					OriginalURL: item.OriginalURL,
-					ShortURL:    shortHash,
-				},
-				resp: BatchShortenResponse{
-					CorrelationID: item.CorrelationID,
-					ShortURL:      shortURL,
-				},
+			records = append(records, repository.URLRecord{
+				OriginalURL: item.OriginalURL,
+				ShortURL:    hex.EncodeToString(hash[:4]),
 			})
-
-			slog.Debug("URL для сокращения", "url", item.OriginalURL)
-		}
-
-		// Извлекаем записи для сохранения
-		records := make([]repository.URLRecord, len(batchEntries))
-		for i, entry := range batchEntries {
-			records[i] = entry.record
 		}
 
 		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
@@ -106,23 +80,11 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 			return
 		}
 
-		// Строим map original_url -> short_url (хеш) из результатов
-		actualShortHashes := make(map[string]string, len(results))
-		for _, r := range results {
-			actualShortHashes[r.OriginalURL] = r.ShortURL
-		}
-
-		// Формируем ответ с полными short_url
 		responses := make([]BatchShortenResponse, len(batchReq))
-		for i, item := range batchReq {
-			shortHash := actualShortHashes[item.OriginalURL]
-			if shortHash == "" {
-				// На случай, если запись не нашлась (не должно происходить)
-				shortHash = batchEntries[i].record.ShortURL
-			}
+		for i := range results {
 			responses[i] = BatchShortenResponse{
-				CorrelationID: item.CorrelationID,
-				ShortURL:      cfg.GetBaseURL() + "/" + shortHash,
+				CorrelationID: batchReq[i].CorrelationID,
+				ShortURL:      cfg.GetBaseURL() + "/" + results[i].ShortURL,
 			}
 		}
 
@@ -133,7 +95,6 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 		}
 
 		slog.Info("Батч URLs создан", "count", len(responses))
-
 		res.WriteHeader(http.StatusCreated)
 		res.Write(respBody)
 	}

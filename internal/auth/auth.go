@@ -98,6 +98,12 @@ func (s *Service) GetUserIDFromCookie(r *http.Request) (string, bool) {
 	return userID, true
 }
 
+// HasCookie проверяет, есть ли кука в запросе (неважно, валидная или нет)
+func (s *Service) HasCookie(r *http.Request) bool {
+	_, err := r.Cookie(CookieName)
+	return err == nil
+}
+
 // SetUserIDCookie устанавливает JWT-куку для нового пользователя
 func (s *Service) SetUserIDCookie(w http.ResponseWriter) {
 	userID := s.GenerateUserID()
