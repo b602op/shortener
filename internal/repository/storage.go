@@ -15,6 +15,7 @@ type URLRecord struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	DeletedFlag bool   `json:"is_deleted,omitempty" db:"is_deleted"`
 }
 
 // Store — интерфейс хранилища URL
@@ -23,6 +24,7 @@ type Store interface {
 	BatchInsert(userID string, records []URLRecord) ([]URLRecord, error)
 	Select(shortURL string) (URLRecord, bool)
 	SelectByUser(userID string) []URLRecord
+	DeleteByUser(userID string, shortURLs []string) error
 }
 
 // FileStorage — хранение в памяти с опциональной записью в файл
@@ -199,10 +201,31 @@ func (s *FileStorage) SelectByUser(userID string) []URLRecord {
 
 	records := make([]URLRecord, 0)
 	for _, record := range s.data {
-		if record.UserID == userID {
+		// Удалённые URL не показываются пользователю
+		if record.UserID == userID && !record.DeletedFlag {
 			records = append(records, record)
 		}
 	}
 
 	return records
+}
+
+// DeleteByUser помечает URL удалёнными (только принадлежащие пользователю)
+func (s *FileStorage) DeleteByUser(userID string, shortURLs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, shortURL := range shortURLs {
+		record, ok := s.data[shortURL]
+		// Удалить может только пользователь, создавший URL
+		if !ok || record.UserID != userID {
+			continue
+		}
+
+		record.DeletedFlag = true
+		s.data[shortURL] = record
+		s.originalIndex[record.OriginalURL] = record
+	}
+
+	return s.saveFile()
 }

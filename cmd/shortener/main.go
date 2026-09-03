@@ -12,6 +12,7 @@ import (
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/worker"
 )
 
 func getSecretKey() string {
@@ -47,7 +48,11 @@ func main() {
 
 	authService := auth.NewService(getSecretKey())
 
-	httpHandler := handler.Handler(cfg, store, authService)
+	// Асинхронное удаление URL по паттерну fanIn
+	deleteService := worker.NewDeleteService(store)
+	defer deleteService.Close()
+
+	httpHandler := handler.Handler(cfg, store, authService, deleteService)
 
 	server := &http.Server{
 		Addr:    addr,
