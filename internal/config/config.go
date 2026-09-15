@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/b602op/shortener/internal/repository"
 )
@@ -12,11 +13,16 @@ import (
 const defaultFileStoragePath = "data/storage.json"
 
 type Config struct {
-	ServerAddress   string
-	BaseURL         string
-	FileStoragePath string
-	DatabaseDSN     string
-	storage         repository.Store
+	ServerAddress        string
+	BaseURL              string
+	FileStoragePath      string
+	DatabaseDSN          string
+	storage              repository.Store
+	DeleteWorkerCount    int           `env:"DELETE_WORKER_COUNT" envDefault:"5"`
+	DeleteQueueSize      int           `env:"DELETE_QUEUE_SIZE" envDefault:"1024"`
+	DeleteBufferSize     int           `env:"DELETE_BUFFER_SIZE" envDefault:"100"`
+	DeleteFlushInterval  time.Duration `env:"DELETE_FLUSH_INTERVAL" envDefault:"1s"`
+	DeleteEnqueueTimeout time.Duration `env:"DELETE_ENQUEUE_TIMEOUT" envDefault:"100ms"`
 }
 
 func New() (*Config, error) {

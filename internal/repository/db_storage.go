@@ -311,9 +311,9 @@ func (s *DBStorage) selectByOriginalURLs(originalURLs []string) ([]URLRecord, er
 func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	var record URLRecord
 	err := s.db.QueryRow(
-		"SELECT short_url, original_url FROM urls WHERE short_url = $1",
+		"SELECT short_url, original_url, is_deleted FROM urls WHERE short_url = $1",
 		shortURL,
-	).Scan(&record.ShortURL, &record.OriginalURL)
+	).Scan(&record.ShortURL, &record.OriginalURL, &record.DeletedFlag)
 
 	if err == sql.ErrNoRows {
 		return record, false
@@ -325,10 +325,10 @@ func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	return record, true
 }
 
-// SelectByUser возвращает все URL, сокращённые указанным пользователем
+// SelectByUser возвращает все неудалённые URL, сокращённые указанным пользователем
 func (s *DBStorage) SelectByUser(userID string) []URLRecord {
 	rows, err := s.db.Query(
-		"SELECT short_url, original_url FROM urls WHERE user_id = $1",
+		"SELECT short_url, original_url FROM urls WHERE user_id = $1 AND is_deleted = FALSE",
 		userID,
 	)
 	if err != nil {
@@ -350,6 +350,23 @@ func (s *DBStorage) SelectByUser(userID string) []URLRecord {
 	}
 
 	return results
+}
+
+// DeleteByUser помечает URL удалёнными множественным обновлением (batch update).
+// Условие по user_id гарантирует, что удалить URL может только его создатель.
+func (s *DBStorage) DeleteByUser(userID string, shortURLs []string) error {
+	if len(shortURLs) == 0 {
+		return nil
+	}
+
+	if _, err := s.db.Exec(
+		"UPDATE urls SET is_deleted = TRUE WHERE user_id = $1 AND short_url = ANY($2)",
+		userID, shortURLs,
+	); err != nil {
+		return fmt.Errorf("ошибка удаления записей: %w", err)
+	}
+
+	return nil
 }
 
 // Close закрывает подключение к базе данных

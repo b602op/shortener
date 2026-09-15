@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 
@@ -41,6 +42,8 @@ func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 
 		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
 		userID, _ := auth.GetUserIDFromContext(req.Context())
+
+		log.Printf("MethodPost: userID=%q", userID)
 
 		// Генерируем короткий URL
 		hash := sha256.Sum256([]byte(originalURL))

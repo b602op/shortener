@@ -15,6 +15,7 @@ type URLRecord struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	DeletedFlag bool   `json:"is_deleted"`
 }
 
 // Store — интерфейс хранилища URL
@@ -23,6 +24,7 @@ type Store interface {
 	BatchInsert(userID string, records []URLRecord) ([]URLRecord, error)
 	Select(shortURL string) (URLRecord, bool)
 	SelectByUser(userID string) []URLRecord
+	DeleteByUser(userID string, shortURLs []string) error
 }
 
 // FileStorage — хранение в памяти с опциональной записью в файл
@@ -30,6 +32,7 @@ type FileStorage struct {
 	mu            sync.Mutex
 	data          map[string]URLRecord // shortURL -> record
 	originalIndex map[string]URLRecord // originalURL -> record (обратный индекс для O(1) поиска дубликатов)
+	userURLs      map[string][]string  // userID -> []shortURL
 	filePath      string
 }
 
@@ -38,6 +41,7 @@ func NewFileStorage() *FileStorage {
 	return &FileStorage{
 		data:          make(map[string]URLRecord),
 		originalIndex: make(map[string]URLRecord),
+		userURLs:      make(map[string][]string),
 	}
 }
 
@@ -78,6 +82,11 @@ func (s *FileStorage) Init(path string) error {
 			for _, record := range records {
 				s.data[record.ShortURL] = record
 				s.originalIndex[record.OriginalURL] = record
+
+				// восстанавливаем индекс пользователя
+				if record.UserID != "" {
+					s.userURLs[record.UserID] = append(s.userURLs[record.UserID], record.ShortURL)
+				}
 			}
 		}
 	}
@@ -106,6 +115,11 @@ func (s *FileStorage) Insert(userID string, originalURL string, shortURL string)
 	s.data[shortURL] = record
 	s.originalIndex[originalURL] = record
 
+	if s.userURLs == nil {
+		s.userURLs = make(map[string][]string)
+	}
+	s.userURLs[userID] = append(s.userURLs[userID], shortURL)
+
 	return s.saveFile()
 }
 
@@ -115,11 +129,17 @@ func (s *FileStorage) BatchInsert(userID string, records []URLRecord) ([]URLReco
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Инициализируем индекс пользователя, если его ещё нет
+	if s.userURLs == nil {
+		s.userURLs = make(map[string][]string)
+	}
+
 	results := make([]URLRecord, len(records))
 
 	for i, record := range records {
 		// Проверяем наличие дубликата по original_url через обратный индекс
 		if existing, ok := s.originalIndex[record.OriginalURL]; ok {
+			// Дубликат — возвращаем существующую запись целиком
 			results[i] = existing
 			continue
 		}
@@ -133,10 +153,12 @@ func (s *FileStorage) BatchInsert(userID string, records []URLRecord) ([]URLReco
 		}
 		s.data[record.ShortURL] = entry
 		s.originalIndex[record.OriginalURL] = entry
-		results[i] = URLRecord{
-			ShortURL:    record.ShortURL,
-			OriginalURL: record.OriginalURL,
-		}
+
+		// Добавляем в индекс пользователя
+		s.userURLs[userID] = append(s.userURLs[userID], record.ShortURL)
+
+		// Возвращаем полную запись (с UUID и UserID)
+		results[i] = entry
 	}
 
 	return results, s.saveFile()
@@ -192,17 +214,49 @@ func (s *FileStorage) Select(shortURL string) (URLRecord, bool) {
 	return record, ok
 }
 
-// SelectByUser возвращает все URL, сокращённые указанным пользователем
+// SelectByUser возвращает все URL, сокращённые указанным пользователем.
+// Удалённые URL (DeletedFlag) не возвращаются.
 func (s *FileStorage) SelectByUser(userID string) []URLRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	records := make([]URLRecord, 0)
-	for _, record := range s.data {
-		if record.UserID == userID {
-			records = append(records, record)
+	shortURLs, ok := s.userURLs[userID]
+	if !ok || len(shortURLs) == 0 {
+		return []URLRecord{}
+	}
+
+	records := make([]URLRecord, 0, len(shortURLs))
+	for _, shortURL := range shortURLs {
+		record, exists := s.data[shortURL]
+		if !exists {
+			continue
 		}
+		// Удалённые URL не показываем пользователю
+		if record.DeletedFlag {
+			continue
+		}
+		records = append(records, record)
 	}
 
 	return records
+}
+
+// DeleteByUser помечает URL удалёнными (только принадлежащие пользователю)
+func (s *FileStorage) DeleteByUser(userID string, shortURLs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, shortURL := range shortURLs {
+		record, ok := s.data[shortURL]
+		// Удалить может только пользователь, создавший URL
+		if !ok || record.UserID != userID {
+			continue
+		}
+
+		record.DeletedFlag = true
+		s.data[shortURL] = record
+		s.originalIndex[record.OriginalURL] = record
+	}
+
+	return s.saveFile()
 }

@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
 	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/worker"
 )
 
 func getSecretKey() string {
@@ -47,7 +49,25 @@ func main() {
 
 	authService := auth.NewService(getSecretKey())
 
-	httpHandler := handler.Handler(cfg, store, authService)
+	// Асинхронное удаление URL по паттерну fanIn
+	workerCfg := worker.Config{
+		WorkerCount:    cfg.DeleteWorkerCount,
+		QueueSize:      cfg.DeleteQueueSize,
+		BufferSize:     cfg.DeleteBufferSize,
+		FlushInterval:  cfg.DeleteFlushInterval,
+		EnqueueTimeout: cfg.DeleteEnqueueTimeout,
+	}
+	deleteService := worker.NewDeleteService(store, workerCfg)
+	defer deleteService.Close()
+
+	deps := handler.Dependencies{
+		Config:        cfg,
+		Store:         store,
+		AuthService:   authService,
+		DeleteService: deleteService,
+	}
+
+	httpHandler := handler.Handler(deps)
 
 	server := &http.Server{
 		Addr:    addr,
@@ -68,7 +88,7 @@ func main() {
 
 	log.Println("Завершение работы сервера...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {

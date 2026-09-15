@@ -3,29 +3,33 @@ package handler
 import (
 	"net/http"
 
-	"github.com/b602op/shortener/internal/auth"
-	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
-func Handler(cfg *config.Config, store repository.Store, authService *auth.Service) http.Handler {
+func Handler(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(GzipMiddleware)
-	r.Use(AuthMiddleware(authService))
 
-	// Передаем store в обработчики
-	r.Post("/", MethodPost(cfg, store))
-	r.Post("/api/shorten", MethodPostAPI(cfg, store))
-	r.Post("/api/shorten/batch", MethodPostBatchAPI(cfg, store))
-	r.Get("/api/user/urls", MethodGetUserURLs(cfg, store, authService))
-	r.Get("/{id}", MethodGet(cfg, store))
-
-	// Добавляем /ping если используется PostgreSQL
-	if dbStore, ok := store.(*repository.DBStorage); ok && dbStore.DB() != nil {
+	// /ping — регистрируем ДО /{id}, иначе /{id} перехватит "ping"
+	if dbStore, ok := deps.Store.(*repository.DBStorage); ok && dbStore.DB() != nil {
 		r.Get("/ping", PingHandler(dbStore.DB()))
 	}
+
+	// Группа роутов, требующих аутентификации
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware(deps.AuthService))
+
+		r.Post("/", MethodPost(deps.Config, deps.Store))
+		r.Post("/api/shorten", MethodPostAPI(deps.Config, deps.Store))
+		r.Post("/api/shorten/batch", MethodPostBatchAPI(deps.Config, deps.Store))
+		r.Get("/api/user/urls", MethodGetUserURLs(deps.Config, deps.Store, deps.AuthService))
+		r.Delete("/api/user/urls", MethodDeleteUserURLs(deps.DeleteService, deps.AuthService))
+	})
+
+	// Редирект по короткой ссылке — без аутентификации
+	r.Get("/{id}", MethodGet(deps.Config, deps.Store))
 
 	return r
 }
