@@ -12,18 +12,20 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// ErrDuplicateURL возвращается при попытке вставить дублирующую запись
+// ErrDuplicateURL возвращается при попытке сохранить originalURL, который уже
+// есть в хранилище.
 var ErrDuplicateURL = errors.New("duplicate URL")
 
 const pgUniqueViolationCode = "23505"
 
-// DBStorage — хранение в PostgreSQL с миграциями
+// DBStorage хранит записи в PostgreSQL и применяет SQL-миграции при инициализации.
 type DBStorage struct {
 	db         *sql.DB
 	migrations string
 }
 
-// NewDBStorage создаёт новое хранилище PostgreSQL
+// NewDBStorage создаёт хранилище PostgreSQL по DSN и проверяет соединение.
+// Возвращает ошибку, если драйвер недоступен или база не отвечает.
 func NewDBStorage(dsn string) (*DBStorage, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -41,7 +43,8 @@ func NewDBStorage(dsn string) (*DBStorage, error) {
 	}, nil
 }
 
-// Init выполняет миграции и инициализирует хранилище
+// Init применяет миграции из директории migrations и подготавливает схему.
+// Возвращает ошибку, если директория не найдена или SQL выполнился с ошибкой.
 func (s *DBStorage) Init() error {
 	if err := s.runMigrations(); err != nil {
 		return fmt.Errorf("ошибка миграций: %w", err)
@@ -205,7 +208,8 @@ func splitStatements(sql string) []string {
 	return statements
 }
 
-// Insert добавляет запись в базу данных
+// Insert добавляет пару originalURL→shortURL, привязывая её к userID.
+// Возвращает ErrDuplicateURL при нарушении уникальности original_url.
 func (s *DBStorage) Insert(userID string, originalURL string, shortURL string) error {
 	_, err := s.db.Exec(
 		"INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)",
@@ -222,8 +226,8 @@ func (s *DBStorage) Insert(userID string, originalURL string, shortURL string) e
 }
 
 // BatchInsert добавляет несколько записей в рамках одной транзакции
-// и возвращает результаты в том же порядке с actual short_url
-// (для дубликатов — существующий, для новых — вставленный)
+// и возвращает результаты в том же порядке с фактическим short_url:
+// для дубликатов — существующий, для новых — вставленный.
 func (s *DBStorage) BatchInsert(userID string, records []URLRecord) ([]URLRecord, error) {
 	if len(records) == 0 {
 		return []URLRecord{}, nil
@@ -307,7 +311,8 @@ func (s *DBStorage) selectByOriginalURLs(originalURLs []string) ([]URLRecord, er
 	return results, rows.Err()
 }
 
-// Select возвращает оригинальный URL по короткому
+// Select возвращает запись по короткому адресу и false, если записи нет
+// либо запрос к базе завершился ошибкой.
 func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	var record URLRecord
 	err := s.db.QueryRow(
@@ -325,7 +330,8 @@ func (s *DBStorage) Select(shortURL string) (URLRecord, bool) {
 	return record, true
 }
 
-// SelectByUser возвращает все неудалённые URL, сокращённые указанным пользователем
+// SelectByUser возвращает все неудалённые URL, сокращённые указанным пользователем.
+// При ошибке запроса возвращает nil.
 func (s *DBStorage) SelectByUser(userID string) []URLRecord {
 	rows, err := s.db.Query(
 		"SELECT short_url, original_url FROM urls WHERE user_id = $1 AND is_deleted = FALSE",
@@ -369,7 +375,7 @@ func (s *DBStorage) DeleteByUser(userID string, shortURLs []string) error {
 	return nil
 }
 
-// Close закрывает подключение к базе данных
+// Close закрывает пул соединений с базой данных; повторный вызов безопасен.
 func (s *DBStorage) Close() error {
 	if s.db != nil {
 		return s.db.Close()
@@ -377,7 +383,7 @@ func (s *DBStorage) Close() error {
 	return nil
 }
 
-// DB возвращает объект database/sql.DB
+// DB возвращает нижележащий *sql.DB, например для проверки доступности БД.
 func (s *DBStorage) DB() *sql.DB {
 	return s.db
 }

@@ -33,7 +33,11 @@ func newTestServer(t *testing.T) *httptest.Server {
 		EnqueueTimeout: 50 * time.Millisecond,
 	})
 
-	t.Cleanup(deleteService.Close)
+	t.Cleanup(func() {
+		if err := deleteService.Close(); err != nil {
+			t.Errorf("failed to close delete service: %v", err)
+		}
+	})
 
 	deps := Dependencies{
 		Config:        cfg,

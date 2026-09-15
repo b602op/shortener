@@ -9,7 +9,9 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
-// UserIDProvider — интерфейс для получения userID из запроса
+// UserIDProvider описывает контракт источника идентификатора пользователя.
+// Реализатор должен уметь читать userID из куки запроса, создавать и
+// устанавливать куку, а также различать отсутствие куки и невалидную куку.
 type UserIDProvider interface {
 	GetUserIDFromCookie(r *http.Request) (string, bool)
 	SetUserIDCookie(w http.ResponseWriter)
@@ -18,17 +20,24 @@ type UserIDProvider interface {
 	HasCookie(r *http.Request) bool
 }
 
-// URLDeleter — интерфейс для удаления URL пользователя
+// URLDeleter описывает контракт приёмника задач на удаление URL.
+// Реализатор принимает идентификатор владельца и список коротких ссылок,
+// которые требуется удалить.
 type URLDeleter interface {
 	DeleteBatch(userID string, shortURLs []string) error
 }
 
+// AuditNotifier описывает контракт рассылки событий аудита.
+// Реализатор должен уметь уведомить всех подписчиков об одном событии и
+// сообщить, есть ли хотя бы один подписчик.
 type AuditNotifier interface {
 	NotifyAll(ctx context.Context, event audit.Event)
 	HasObservers() bool
 }
 
-// Dependencies — все зависимости, которые нужны роутеру
+// Dependencies группирует все зависимости, необходимые для сборки роутера.
+// Обязательны Config и Store; AuthService, DeleteService и AuditService могут
+// быть равны nil, если соответствующая функциональность не используется.
 type Dependencies struct {
 	Config        *config.Config
 	Store         repository.Store

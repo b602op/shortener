@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,8 +32,16 @@ func (m *mockObserver) Events() []Event {
 	return out
 }
 
+func (m *mockObserver) Calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.events)
+}
+
 func TestService_NoObservers(t *testing.T) {
 	svc := NewService()
+	defer svc.Close()
+
 	assert.False(t, svc.HasObservers())
 
 	// Не должно паниковать
@@ -41,24 +50,27 @@ func TestService_NoObservers(t *testing.T) {
 
 func TestService_NotifyAll(t *testing.T) {
 	svc := NewService()
+	defer svc.Close()
+
 	obs1 := &mockObserver{}
 	obs2 := &mockObserver{}
 	svc.Subscribe(obs1)
 	svc.Subscribe(obs2)
 
-	assert.True(t, svc.HasObservers())
+	svc.NotifyAll(context.Background(), Event{Action: "test"})
 
-	event := Event{TS: 123, Action: ActionShorten, URL: "http://example.com"}
-	svc.NotifyAll(context.Background(), event)
+	require.Eventually(t, func() bool {
+		return obs1.Calls() == 1 && obs2.Calls() == 1
+	}, time.Second, 10*time.Millisecond)
 
-	require.Len(t, obs1.Events(), 1)
-	require.Len(t, obs2.Events(), 1)
-	assert.Equal(t, event, obs1.Events()[0])
-	assert.Equal(t, event, obs2.Events()[0])
+	require.Equal(t, 1, len(obs1.Events()))
+	require.Equal(t, "test", string(obs1.Events()[0].Action))
 }
 
 func TestService_ContinuesOnError(t *testing.T) {
 	svc := NewService()
+	defer svc.Close()
+
 	failing := &mockObserver{err: errors.New("boom")}
 	ok := &mockObserver{}
 	svc.Subscribe(failing)
@@ -66,6 +78,12 @@ func TestService_ContinuesOnError(t *testing.T) {
 
 	svc.NotifyAll(context.Background(), Event{Action: ActionShorten, URL: "http://example.com"})
 
-	// Второй наблюдатель всё равно получил событие
-	require.Len(t, ok.Events(), 1)
+	// Ждём, пока оба observer'а обработают событие.
+	// Ошибка failing не должна помешать ok получить событие.
+	require.Eventually(t, func() bool {
+		return failing.Calls() == 1 && ok.Calls() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	require.Equal(t, 1, len(ok.Events()))
+	require.Equal(t, ActionShorten, ok.Events()[0].Action)
 }

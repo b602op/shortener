@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,33 +17,59 @@ import (
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
-	"github.com/b602op/shortener/internal/repository"
 	"github.com/b602op/shortener/internal/worker"
 )
 
-func getSecretKey() string {
+// getSecretKey возвращает секретный ключ для JWT.
+//
+// Приоритет:
+//  1. Переменная окружения AUTH_SECRET_KEY (для production).
+//  2. Случайный ключ, сгенерированный для текущей сессии (для разработки
+//     и автотестов). Токены не переживут перезапуск.
+func getSecretKey() (string, error) {
 	if key := os.Getenv("AUTH_SECRET_KEY"); key != "" {
-		return key
+		return key, nil
 	}
-	return "super-secret-key-change-me"
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("не удалось сгенерировать AUTH_SECRET_KEY: %w", err)
+	}
+
+	key := hex.EncodeToString(buf)
+	log.Println("ВНИМАНИЕ: AUTH_SECRET_KEY не задан. " +
+		"Сгенерирован случайный ключ для текущей сессии. " +
+		"Все выданные токены станут недействительными после перезапуска. " +
+		"Для production задайте AUTH_SECRET_KEY.")
+
+	return key, nil
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatalf("Ошибка: %v", err)
+	}
+}
+
+func run() error {
 	cfg, err := config.New()
 	if err != nil {
-		log.Fatalf("Ошибка конфигурации: %v", err)
+		return err
 	}
+
+	// === Ресурсы, требующие Close ===
+	var closers []io.Closer
+	defer func() {
+		for i := len(closers) - 1; i >= 0; i-- {
+			if err := closers[i].Close(); err != nil {
+				log.Printf("Ошибка закрытия ресурса: %v", err)
+			}
+		}
+	}()
 
 	store := cfg.GetStorage()
-
-	// Сохраняем данные при завершении сервера
-	if fileStore, ok := store.(*repository.FileStorage); ok {
-		defer fileStore.Close()
-	}
-
-	// Если используется DBStorage, закрываем подключение при завершении
-	if dbStore, ok := store.(*repository.DBStorage); ok {
-		defer dbStore.Close()
+	if closer, ok := store.(io.Closer); ok {
+		closers = append(closers, closer)
 	}
 
 	addr := cfg.GetServerAddress()
@@ -48,14 +78,23 @@ func main() {
 	log.Printf("Сервер запускается на %s", addr)
 	log.Printf("Базовый URL: %s", baseURL)
 
-	authService := auth.NewService(getSecretKey())
+	// === Секретный ключ ===
+	secretKey, err := getSecretKey()
+	if err != nil {
+		return err
+	}
+	authService := auth.NewService(secretKey)
+
+	// === Аудит ===
 	auditService := audit.NewService()
+	closers = append(closers, auditService)
 
 	if cfg.AuditFile != "" {
 		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
 		if err != nil {
-			log.Fatalf("Ошибка инициализации файлового аудита: %v", err)
+			return err
 		}
+		closers = append(closers, fileObs)
 		auditService.Subscribe(fileObs)
 		log.Printf("Аудит в файл: %s", cfg.AuditFile)
 	}
@@ -70,7 +109,7 @@ func main() {
 		log.Println("Аудит отключён")
 	}
 
-	// Асинхронное удаление URL по паттерну fanIn
+	// === Worker ===
 	workerCfg := worker.Config{
 		WorkerCount:    cfg.DeleteWorkerCount,
 		QueueSize:      cfg.DeleteQueueSize,
@@ -79,8 +118,9 @@ func main() {
 		EnqueueTimeout: cfg.DeleteEnqueueTimeout,
 	}
 	deleteService := worker.NewDeleteService(store, workerCfg)
-	defer deleteService.Close()
+	closers = append(closers, deleteService)
 
+	// === HTTP-сервер ===
 	deps := handler.Dependencies{
 		Config:        cfg,
 		Store:         store,
@@ -96,26 +136,35 @@ func main() {
 		Handler: httpHandler,
 	}
 
-	// Запуск в горутине
+	// === Контекст с сигналом ===
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// === Запуск сервера ===
+	serverErr := make(chan error, 1)
 	go func() {
+		log.Printf("HTTP-сервер слушает %s", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Ошибка сервера: %v", err)
+			serverErr <- err
 		}
 	}()
 
-	// Ожидание сигнала завершения
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// === Ожидание сигнала или ошибки сервера ===
+	select {
+	case err := <-serverErr:
+		return err
+	case <-ctx.Done():
+		log.Println("Завершение работы сервера...")
+	}
 
-	log.Println("Завершение работы сервера...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// === Graceful shutdown ===
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Ошибка завершения сервера: %v", err)
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Ошибка завершения сервера: %v", err)
 	}
 
 	log.Println("Сервер завершил работу")
+	return nil
 }

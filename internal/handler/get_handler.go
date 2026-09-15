@@ -10,6 +10,9 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
+// MethodGet возвращает обработчик GET /{id} — редирект по короткой ссылке.
+// Ответ: 307 с заголовком Location, 404 если короткий адрес неизвестен,
+// 410 если запись помечена удалённой, 400 при пустом идентификаторе.
 func MethodGet(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос", "uri", req.RequestURI)
