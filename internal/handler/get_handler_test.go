@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"log"
-
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 	"github.com/stretchr/testify/assert"
@@ -19,19 +17,17 @@ func TestMethodGet_Basic(t *testing.T) {
 	testOriginal := "https://example.com/very/long/url"
 
 	storage := repository.NewFileStorage()
-	storage.Insert("", testOriginal, testShort)
+	require.NoError(t, storage.Insert("", testOriginal, testShort))
 
 	cfg := config.NewTest()
 
 	req := httptest.NewRequest(http.MethodGet, "/"+testShort, nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage)(rec, req)
+	MethodGet(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 	location := rec.Header().Get("Location")
-
-	log.Println("что тут происходит?", testOriginal, location)
 
 	assert.Equal(t, testOriginal, location)
 	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
@@ -45,9 +41,7 @@ func TestMethodGet_WrongMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/a1b2c3d4", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage)(rec, req)
-
-	log.Println(rec.Body.String(), rec.Code)
+	MethodGet(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -65,9 +59,7 @@ func TestMethodGet_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown123", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage)(rec, req)
-
-	log.Println(rec.Body.String())
+	MethodGet(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -85,7 +77,7 @@ func TestMethodGet_EmptyPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage)(rec, req)
+	MethodGet(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))

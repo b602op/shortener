@@ -5,11 +5,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 )
 
-func MethodGet(cfg *config.Config, store repository.Store) http.HandlerFunc {
+func MethodGet(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос", "uri", req.RequestURI)
 
@@ -40,6 +41,8 @@ func MethodGet(cfg *config.Config, store repository.Store) http.HandlerFunc {
 			res.WriteHeader(http.StatusGone)
 			return
 		}
+
+		notifyAudit(req, auditService, audit.ActionFollow, record.OriginalURL)
 
 		res.Header().Set("Location", record.OriginalURL)
 		res.Header().Set("Content-Type", "text/plain")

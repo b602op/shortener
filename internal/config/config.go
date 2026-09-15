@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/b602op/shortener/internal/repository"
@@ -13,6 +14,8 @@ import (
 const defaultFileStoragePath = "data/storage.json"
 
 type Config struct {
+	AuditFile            string `env:"AUDIT_FILE"`
+	AuditURL             string `env:"AUDIT_URL"`
 	ServerAddress        string
 	BaseURL              string
 	FileStoragePath      string
@@ -30,20 +33,33 @@ func New() (*Config, error) {
 	baseURL := flag.String("b", "http://localhost:8080", "базовый адрес результирующего сокращённого URL")
 	fileStoragePath := flag.String("f", "", "путь до файла для хранения данных")
 	databaseDSN := flag.String("d", "", "DSN для подключения к PostgreSQL")
+	auditFile := flag.String("audit-file", "", "путь к файлу аудита")
+	auditURL := flag.String("audit-url", "", "URL сервера аудита")
 
 	flag.Parse()
 
 	serverAddressValue := getEnvOrFlag("SERVER_ADDRESS", *serverAddress)
 	baseURLValue := getEnvOrFlag("BASE_URL", *baseURL)
 	databaseDSNValue := getEnvOrFlag("DATABASE_DSN", *databaseDSN)
-
 	fileStoragePathValue := getFileStoragePath(*fileStoragePath)
+	auditFileValue := getEnvOrFlag("AUDIT_FILE", *auditFile)
+	auditURLValue := getEnvOrFlag("AUDIT_URL", *auditURL)
 
 	config := &Config{
 		ServerAddress:   serverAddressValue,
 		BaseURL:         baseURLValue,
 		FileStoragePath: fileStoragePathValue,
 		DatabaseDSN:     databaseDSNValue,
+		AuditFile:       auditFileValue,
+		AuditURL:        auditURLValue,
+
+		// Параметры воркера удаления. Значения по умолчанию,
+		// переопределяются через env DELETE_*.
+		DeleteWorkerCount:    getEnvInt("DELETE_WORKER_COUNT", 5),
+		DeleteQueueSize:      getEnvInt("DELETE_QUEUE_SIZE", 1024),
+		DeleteBufferSize:     getEnvInt("DELETE_BUFFER_SIZE", 100),
+		DeleteFlushInterval:  getEnvDuration("DELETE_FLUSH_INTERVAL", time.Second),
+		DeleteEnqueueTimeout: getEnvDuration("DELETE_ENQUEUE_TIMEOUT", 100*time.Millisecond),
 	}
 
 	if err := config.Validate(); err != nil {
@@ -103,12 +119,39 @@ func getFileStoragePath(flagValue string) string {
 	if envValue := os.Getenv("FILE_STORAGE_PATH"); envValue != "" {
 		return envValue
 	}
-
 	if flagValue != "" {
 		return flagValue
 	}
-
 	return defaultFileStoragePath
+}
+
+// getEnvInt читает env-переменную как int. При ошибке парсинга возвращает defaultValue.
+func getEnvInt(envVar string, defaultValue int) int {
+	raw := os.Getenv(envVar)
+	if raw == "" {
+		return defaultValue
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("Некорректное значение env, используется дефолт", "env", envVar, "value", raw, "default", defaultValue)
+		return defaultValue
+	}
+	return v
+}
+
+// getEnvDuration читает env-переменную как time.Duration.
+// При ошибке парсинга возвращает defaultValue.
+func getEnvDuration(envVar string, defaultValue time.Duration) time.Duration {
+	raw := os.Getenv(envVar)
+	if raw == "" {
+		return defaultValue
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil {
+		slog.Warn("Некорректное значение env, используется дефолт", "env", envVar, "value", raw, "default", defaultValue)
+		return defaultValue
+	}
+	return v
 }
 
 func NewTest() *Config {

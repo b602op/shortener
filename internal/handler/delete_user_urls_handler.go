@@ -12,22 +12,22 @@ import (
 // 401 — пользователь не авторизован.
 // 400 — некорректное тело запроса.
 // 202 — запрос принят, фактическое удаление произойдёт позже.
-func MethodDeleteUserURLs(deleteService URLDeleter, authService UserIDProvider) http.HandlerFunc {
+func MethodDeleteUserURLs(deleteService URLDeleter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.GetUserIDFromContext(r.Context())
 		if !ok || userID == "" {
-			http.Error(w, "Пользователь не авторизован", http.StatusUnauthorized)
+			respondWithError(w, "Пользователь не авторизован", http.StatusUnauthorized)
 			return
 		}
 
 		var shortURLs []string
 		if err := json.NewDecoder(r.Body).Decode(&shortURLs); err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+			respondWithError(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
 
 		if err := deleteService.DeleteBatch(userID, shortURLs); err != nil {
-			http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+			respondWithError(w, "Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
 

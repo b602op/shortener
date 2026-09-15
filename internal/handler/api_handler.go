@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
@@ -22,7 +23,7 @@ type ShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc {
+func MethodPostAPI(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос к API", "uri", req.RequestURI)
 
@@ -30,8 +31,6 @@ func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc 
 			respondWithError(res, "Метод не разрешен", http.StatusMethodNotAllowed)
 			return
 		}
-
-		res.Header().Set("Content-Type", "application/json")
 
 		defer req.Body.Close()
 
@@ -76,6 +75,8 @@ func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc 
 			return
 		}
 
+		notifyAudit(req, auditService, audit.ActionShorten, shortenReq.URL)
+
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 
 		shortenResp := ShortenResponse{Result: shortURL}
@@ -85,6 +86,7 @@ func MethodPostAPI(cfg *config.Config, store repository.Store) http.HandlerFunc 
 			return
 		}
 
+		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
 		res.Write(respBody)
 	}
