@@ -10,7 +10,6 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
-// userURLResponse — объект ответа со списком URL пользователя
 type userURLResponse struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
@@ -20,17 +19,9 @@ type userURLResponse struct {
 // 401 — если кука присутствует, но не содержит валидный ID пользователя.
 // 204 — если пользователь ещё не сокращал URL.
 // 200 — список сокращённых URL в формате JSON.
-func MethodGetUserURLs(cfg *config.Config, store repository.Store, authService UserIDProvider) http.HandlerFunc {
+func MethodGetUserURLs(cfg *config.Config, store repository.Store) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос к API", "uri", req.RequestURI)
-
-		// Кука присутствует, но не проходит проверку подлинности
-		if _, err := req.Cookie(auth.CookieName); err == nil {
-			if _, ok := authService.GetUserIDFromCookie(req); !ok {
-				respondWithError(res, "Пользователь не авторизован", http.StatusUnauthorized)
-				return
-			}
-		}
 
 		userID, ok := auth.GetUserIDFromContext(req.Context())
 		if !ok || userID == "" {

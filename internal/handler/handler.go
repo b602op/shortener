@@ -21,15 +21,15 @@ func Handler(deps Dependencies) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(deps.AuthService))
 
-		r.Post("/", MethodPost(deps.Config, deps.Store))
-		r.Post("/api/shorten", MethodPostAPI(deps.Config, deps.Store))
+		r.Post("/", MethodPost(deps.Config, deps.Store, deps.AuditService))
+		r.Post("/api/shorten", MethodPostAPI(deps.Config, deps.Store, deps.AuditService))
 		r.Post("/api/shorten/batch", MethodPostBatchAPI(deps.Config, deps.Store))
-		r.Get("/api/user/urls", MethodGetUserURLs(deps.Config, deps.Store, deps.AuthService))
-		r.Delete("/api/user/urls", MethodDeleteUserURLs(deps.DeleteService, deps.AuthService))
+		r.Get("/api/user/urls", MethodGetUserURLs(deps.Config, deps.Store))
+		r.Delete("/api/user/urls", MethodDeleteUserURLs(deps.DeleteService))
 	})
 
 	// Редирект по короткой ссылке — без аутентификации
-	r.Get("/{id}", MethodGet(deps.Config, deps.Store))
+	r.Get("/{id}", MethodGet(deps.Config, deps.Store, deps.AuditService))
 
 	return r
 }

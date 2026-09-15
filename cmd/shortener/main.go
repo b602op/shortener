@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
@@ -48,6 +49,26 @@ func main() {
 	log.Printf("Базовый URL: %s", baseURL)
 
 	authService := auth.NewService(getSecretKey())
+	auditService := audit.NewService()
+
+	if cfg.AuditFile != "" {
+		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			log.Fatalf("Ошибка инициализации файлового аудита: %v", err)
+		}
+		auditService.Subscribe(fileObs)
+		log.Printf("Аудит в файл: %s", cfg.AuditFile)
+	}
+
+	if cfg.AuditURL != "" {
+		httpObs := audit.NewHTTPObserver(cfg.AuditURL)
+		auditService.Subscribe(httpObs)
+		log.Printf("Аудит на сервер: %s", cfg.AuditURL)
+	}
+
+	if cfg.AuditFile == "" && cfg.AuditURL == "" {
+		log.Println("Аудит отключён")
+	}
 
 	// Асинхронное удаление URL по паттерну fanIn
 	workerCfg := worker.Config{
@@ -65,6 +86,7 @@ func main() {
 		Store:         store,
 		AuthService:   authService,
 		DeleteService: deleteService,
+		AuditService:  auditService,
 	}
 
 	httpHandler := handler.Handler(deps)

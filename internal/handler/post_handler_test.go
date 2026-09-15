@@ -27,7 +27,7 @@ func TestMethodPost_Basic(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage)(rec, req)
+	MethodPost(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
@@ -48,7 +48,7 @@ func TestMethodPost_WrongMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage)(rec, req)
+	MethodPost(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -66,7 +66,7 @@ func TestMethodPost_EmptyBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(""))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage)(rec, req)
+	MethodPost(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -88,7 +88,7 @@ func TestMethodPost_LongURL(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(testURL))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage)(rec, req)
+	MethodPost(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 
@@ -111,7 +111,7 @@ func TestMethodPost_ErrorReadingBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", failingReader)
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage)(rec, req)
+	MethodPost(cfg, storage, nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))

@@ -5,16 +5,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 
+	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
 )
 
-func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
+func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос", "uri", req.RequestURI)
 
@@ -43,8 +43,6 @@ func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
 		userID, _ := auth.GetUserIDFromContext(req.Context())
 
-		log.Printf("MethodPost: userID=%q", userID)
-
 		// Генерируем короткий URL
 		hash := sha256.Sum256([]byte(originalURL))
 		shortHash := hex.EncodeToString(hash[:4])
@@ -62,6 +60,8 @@ func MethodPost(cfg *config.Config, store repository.Store) http.HandlerFunc {
 			respondWithError(res, "Failed to save URL", http.StatusInternalServerError)
 			return
 		}
+
+		notifyAudit(req, auditService, audit.ActionShorten, originalURL)
 
 		shortURL := cfg.GetBaseURL() + "/" + shortHash
 

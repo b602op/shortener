@@ -55,6 +55,22 @@ type DeleteService struct {
 
 // NewDeleteService создаёт и запускает сервис асинхронного удаления
 func NewDeleteService(store repository.Store, cfg Config) *DeleteService {
+	if cfg.WorkerCount <= 0 {
+		cfg.WorkerCount = 1
+	}
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = 1
+	}
+	if cfg.BufferSize <= 0 {
+		cfg.BufferSize = 1
+	}
+	if cfg.FlushInterval <= 0 {
+		cfg.FlushInterval = time.Second
+	}
+	if cfg.EnqueueTimeout <= 0 {
+		cfg.EnqueueTimeout = 100 * time.Millisecond
+	}
+
 	s := &DeleteService{
 		store: store,
 		cfg:   cfg,
