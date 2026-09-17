@@ -8,42 +8,70 @@ import (
 	"sync"
 )
 
-// FileObserver пишет события аудита в файл, по одному JSON на строку
+// FileObserver пишет события аудита в файл, по одному JSON-объекту на строку.
+// Потокобезопасен за счёт мьютекса.
+//
+// После использования необходимо вызвать Close, чтобы освободить файловый
+// дескриптор.
 type FileObserver struct {
 	mu       sync.Mutex
-	filePath string
+	file     *os.File
+	closeErr error
 }
 
-// NewFileObserver создаёт файловый приёмник.
-// Файл открывается на дозапись, создаётся при необходимости.
+// NewFileObserver создаёт приёмник, пишущий в файл filePath.
+// Файл открывается на дозапись и создаётся при необходимости; ошибка возвращается,
+// если путь недоступен для записи.
+//
+// Вызывающий код обязан вызвать Close после завершения работы.
 func NewFileObserver(filePath string) (*FileObserver, error) {
 	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось открыть файл аудита: %w", err)
 	}
-	f.Close()
-	return &FileObserver{filePath: filePath}, nil
+	return &FileObserver{file: f}, nil
 }
 
-// Notify дописывает событие в конец файла на новой строке
+// Notify дописывает событие в конец файла отдельной строкой.
+// Контекст не используется; ошибка возвращается при сбое маршалинга или записи.
 func (o *FileObserver) Notify(_ context.Context, event Event) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
+	// 1. Маршалинг — вне мьютекса (работает только с event)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга события: %w", err)
 	}
 	data = append(data, '\n')
 
-	f, err := os.OpenFile(o.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("ошибка открытия файла аудита: %w", err)
-	}
-	defer f.Close()
+	// 2. Запись — под мьютексом (единственная операция с общим ресурсом)
+	o.mu.Lock()
+	defer o.mu.Unlock()
 
-	if _, err := f.Write(data); err != nil {
+	if o.file == nil {
+		return fmt.Errorf("file observer is closed")
+	}
+
+	if _, err := o.file.Write(data); err != nil {
 		return fmt.Errorf("ошибка записи в файл аудита: %w", err)
 	}
+	return nil
+}
+
+// Close закрывает файл аудита и освобождает файловый дескриптор.
+// Безопасно вызывать повторно.
+func (o *FileObserver) Close() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.file == nil {
+		return o.closeErr
+	}
+
+	o.closeErr = o.file.Close()
+	o.file = nil
+
+	if o.closeErr != nil {
+		return fmt.Errorf("не удалось закрыть файл аудита: %w", o.closeErr)
+	}
+
 	return nil
 }

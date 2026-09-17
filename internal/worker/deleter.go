@@ -1,3 +1,5 @@
+// Package worker асинхронно обрабатывает задачи на удаление ссылок,
+// накапливая их в буфере и применяя батчами.
 package worker
 
 import (
@@ -9,16 +11,18 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
-// ErrQueueFull возвращается, когда очередь удаления переполнена
+// ErrQueueFull возвращается, когда очередь удаления переполнена или сервис закрыт,
+// и задача не принята к обработке.
 var ErrQueueFull = errors.New("delete queue is full")
 
-// DeleteTask — задача на удаление сокращённого URL
+// DeleteTask — задача на удаление одной короткой ссылки у указанного пользователя.
 type DeleteTask struct {
 	UserID   string
 	ShortURL string
 }
 
-// Config — параметры сервиса асинхронного удаления
+// Config задаёт пропускную способность сервиса асинхронного удаления:
+// число воркеров, размеры очереди и буфера, период сброса и ожидание слота.
 type Config struct {
 	WorkerCount    int
 	QueueSize      int
@@ -27,7 +31,8 @@ type Config struct {
 	EnqueueTimeout time.Duration
 }
 
-// DefaultConfig возвращает конфиг с параметрами по умолчанию
+// DefaultConfig возвращает конфигурацию со значениями по умолчанию:
+// 5 воркеров, очередь 1024, буфер 100, сброс раз в секунду, ожидание слота 100 мс.
 func DefaultConfig() Config {
 	return Config{
 		WorkerCount:    5,
@@ -38,7 +43,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// DeleteService — асинхронное удаление URL по паттерну fanIn
+// DeleteService принимает задачи на удаление и применяет их батчами:
+// воркеры сходятся в один канал (fanIn), коллектор копит буфер и сбрасывает
+// его в хранилище по заполнению или по таймеру.
 type DeleteService struct {
 	store repository.Store
 	cfg   Config
@@ -53,7 +60,9 @@ type DeleteService struct {
 	collectorWg sync.WaitGroup
 }
 
-// NewDeleteService создаёт и запускает сервис асинхронного удаления
+// NewDeleteService создаёт сервис удаления и сразу запускает воркеры и коллектор.
+// Неположительные значения cfg заменяются безопасными минимумами, поэтому
+// допустим и нулевой Config.
 func NewDeleteService(store repository.Store, cfg Config) *DeleteService {
 	if cfg.WorkerCount <= 0 {
 		cfg.WorkerCount = 1
@@ -89,8 +98,9 @@ func NewDeleteService(store repository.Store, cfg Config) *DeleteService {
 	return s
 }
 
-// Delete ставит одну задачу на асинхронное удаление.
-// Если сервис закрыт — возвращает ErrQueueFull без паники.
+// Delete ставит одну задачу на асинхронное удаление, ожидая свободный слот
+// не дольше EnqueueTimeout. Возвращает ErrQueueFull, если сервис закрыт
+// или очередь переполнена, — паника в закрытый канал исключена.
 func (s *DeleteService) Delete(userID, shortURL string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -111,7 +121,8 @@ func (s *DeleteService) Delete(userID, shortURL string) error {
 	}
 }
 
-// DeleteBatch ставит несколько задач на удаление.
+// DeleteBatch ставит в очередь все переданные короткие ссылки одного пользователя.
+// Останавливается на первой ошибке и возвращает её, например ErrQueueFull.
 func (s *DeleteService) DeleteBatch(userID string, shortURLs []string) error {
 	for _, shortURL := range shortURLs {
 		if err := s.Delete(userID, shortURL); err != nil {
@@ -180,7 +191,7 @@ func (s *DeleteService) flush(buffer []DeleteTask) {
 
 // Close останавливает приём задач и дожидается обработки всех оставшихся.
 // Идемпотентен: повторный вызов не паникует.
-func (s *DeleteService) Close() {
+func (s *DeleteService) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
@@ -191,4 +202,5 @@ func (s *DeleteService) Close() {
 		close(s.fanIn)
 		s.collectorWg.Wait()
 	})
+	return nil
 }

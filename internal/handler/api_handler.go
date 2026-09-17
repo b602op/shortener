@@ -15,14 +15,20 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
+// ShortenRequest — тело JSON-запроса к API сокращения.
 type ShortenRequest struct {
 	URL string `json:"url"`
 }
 
+// ShortenResponse — тело JSON-ответа с полным коротким URL.
 type ShortenResponse struct {
 	Result string `json:"result"`
 }
 
+// MethodPostAPI возвращает обработчик POST /api/shorten с JSON-телом.
+// Ожидает объект с полем url; короткий адрес — первые 4 байта SHA-256.
+// Ответ: 201 с полем result, 409 с существующим адресом при дубликате,
+// 400 при некорректном JSON или пустом url, 500 при ошибке сохранения.
 func MethodPostAPI(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос к API", "uri", req.RequestURI)

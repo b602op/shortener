@@ -25,6 +25,10 @@ type BatchShortenResponse struct {
 	ShortURL      string `json:"short_url"`
 }
 
+// MethodPostBatchAPI возвращает обработчик POST /api/shorten/batch.
+// Принимает JSON-массив элементов с correlation_id и original_url, сохраняет
+// их одним вызовом BatchInsert. Ответ: 201 с массивом short_url в том же
+// порядке; 400 при некорректном JSON, пустом батче или пустом url элемента.
 func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос к API batch", "uri", req.RequestURI)

@@ -1,3 +1,5 @@
+// Package config собирает параметры сервиса из флагов и переменных окружения
+// и выбирает хранилище URL.
 package config
 
 import (
@@ -13,6 +15,8 @@ import (
 
 const defaultFileStoragePath = "data/storage.json"
 
+// Config — настройки HTTP-сервера, базового адреса, хранилища, аудита
+// и воркера удаления. Собирается функцией New из флагов и переменных окружения.
 type Config struct {
 	AuditFile            string `env:"AUDIT_FILE"`
 	AuditURL             string `env:"AUDIT_URL"`
@@ -28,6 +32,10 @@ type Config struct {
 	DeleteEnqueueTimeout time.Duration `env:"DELETE_ENQUEUE_TIMEOUT" envDefault:"100ms"`
 }
 
+// New читает флаги и переменные окружения, валидирует результат и поднимает
+// хранилище по приоритету: PostgreSQL → файл → память.
+// Возвращает ошибку только при некорректных параметрах; сбой подключения
+// к хранилищу не фатален — используется хранилище в памяти.
 func New() (*Config, error) {
 	serverAddress := flag.String("a", "localhost:8080", "адрес запуска HTTP-сервера")
 	baseURL := flag.String("b", "http://localhost:8080", "базовый адрес результирующего сокращённого URL")
@@ -154,6 +162,8 @@ func getEnvDuration(envVar string, defaultValue time.Duration) time.Duration {
 	return v
 }
 
+// NewTest возвращает конфигурацию с фиксированными значениями и хранилищем
+// в памяти, пригодную для тестов без флагов и окружения.
 func NewTest() *Config {
 	return &Config{
 		ServerAddress:   "localhost:8080",
@@ -164,10 +174,13 @@ func NewTest() *Config {
 	}
 }
 
+// SetStorage подменяет хранилище, например для инъекции фейка в тестах.
 func (c *Config) SetStorage(s repository.Store) {
 	c.storage = s
 }
 
+// GetStorage возвращает активное хранилище, при необходимости создавая
+// хранилище в памяти.
 func (c *Config) GetStorage() repository.Store {
 	if c.storage == nil {
 		c.storage = repository.NewFileStorage()
@@ -175,6 +188,8 @@ func (c *Config) GetStorage() repository.Store {
 	return c.storage
 }
 
+// Validate проверяет обязательные поля: адрес сервера и базовый URL.
+// Возвращает ошибку с указанием пустого поля.
 func (c *Config) Validate() error {
 	if c.ServerAddress == "" {
 		return fmt.Errorf("адрес сервера не может быть пустым")
@@ -187,18 +202,22 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// GetServerAddress возвращает адрес, на котором поднимается HTTP-сервер.
 func (c *Config) GetServerAddress() string {
 	return c.ServerAddress
 }
 
+// GetBaseURL возвращает префикс, с которым формируются короткие ссылки.
 func (c *Config) GetBaseURL() string {
 	return c.BaseURL
 }
 
+// GetFileStoragePath возвращает путь к файлу файлового хранилища.
 func (c *Config) GetFileStoragePath() string {
 	return c.FileStoragePath
 }
 
+// GetDatabaseDSN возвращает строку подключения к PostgreSQL; пустая — если БД не задана.
 func (c *Config) GetDatabaseDSN() string {
 	return c.DatabaseDSN
 }

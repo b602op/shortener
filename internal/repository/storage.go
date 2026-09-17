@@ -1,8 +1,12 @@
+// Package repository содержит хранилища сокращённых URL: в памяти с файлом
+// и в PostgreSQL.
 package repository
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -10,7 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// URLRecord — структура записи URL
+// URLRecord — запись о сокращённой ссылке: идентификаторы, исходный адрес,
+// владелец и признак удаления.
 type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
@@ -19,7 +24,9 @@ type URLRecord struct {
 	DeletedFlag bool   `json:"is_deleted"`
 }
 
-// Store — интерфейс хранилища URL
+// Store описывает контракт хранилища сокращённых URL.
+// Реализации: FileStorage (в памяти + файл) и DBStorage (PostgreSQL).
+// Реализации должны быть безопасны для конкурентного вызова из нескольких горутин.
 type Store interface {
 	Insert(userID string, originalURL string, shortURL string) error
 	BatchInsert(userID string, records []URLRecord) ([]URLRecord, error)
@@ -28,7 +35,9 @@ type Store interface {
 	DeleteByUser(userID string, shortURLs []string) error
 }
 
-// FileStorage — хранение в памяти с опциональной записью в файл
+// FileStorage хранит записи в памяти и при наличии пути дублирует их в файл.
+// Поиски по короткому адресу и по исходному выполняются за O(1) за счёт
+// обратного индекса originalURL.
 type FileStorage struct {
 	mu            sync.Mutex
 	data          map[string]URLRecord // shortURL -> record
@@ -37,7 +46,8 @@ type FileStorage struct {
 	filePath      string
 }
 
-// NewFileStorage создаёт новое файловое хранилище
+// NewFileStorage создаёт хранилище в памяти без привязки к файлу.
+// Для включения persistence нужен вызов Init.
 func NewFileStorage() *FileStorage {
 	return &FileStorage{
 		data:          make(map[string]URLRecord),
@@ -46,20 +56,20 @@ func NewFileStorage() *FileStorage {
 	}
 }
 
-// TODO с оптимизацией // generateUUID создаёт случайный UUID v4.
+// generateUUID создаёт случайный UUID v4.
 func generateUUID() string {
 	return uuid.New().String()
 }
 
-// func generateUUID() string {
-// 	b := make([]byte, 16)
-// 	_, _ = rand.Read(b)
-// 	b[6] = (b[6] & 0x0f) | 0x40
-// 	b[8] = (b[8] & 0x3f) | 0x80
-// 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
-// }
-
-// // TODO вернуть с оптимизацией // Init инициализирует хранилище, загружая данные из файла
+// Init инициализирует хранилище, загружая данные из файла по указанному пути.
+//
+// Формат файла: JSON-lines — по одному JSON-объекту URLRecord на строку.
+// Пустые строки игнорируются.
+//
+// ВАЖНО: сервис не поддерживает старый формат (JSON-массив).
+//
+// Если path указывает на существующую директорию, используется файл storage.json в ней.
+// Отсутствие файла не ошибка — хранилище остаётся пустым.
 func (s *FileStorage) Init(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,62 +91,64 @@ func (s *FileStorage) Init(path string) error {
 	}
 	defer f.Close()
 
-	decoder := json.NewDecoder(f)
+	// Проверяем первый непробельный байт: '[' — старый формат (JSON-массив).
+	reader := bufio.NewReader(f)
+	firstByte, err := peekFirstNonSpace(reader)
+	if err != nil {
+		if err == io.EOF {
+			return nil // пустой файл
+		}
+		return fmt.Errorf("ошибка чтения файла: %w", err)
+	}
+	if firstByte == '[' {
+		return fmt.Errorf(
+			"файл %s использует устаревший формат JSON-массив; "+
+				"сервис поддерживает только JSON-lines — см. README.md",
+			s.filePath,
+		)
+	}
+
+	// Читаем JSON-lines через decoder — он сам обрабатывает поток объектов.
+	decoder := json.NewDecoder(reader)
+	lineNum := 0
 	for decoder.More() {
+		lineNum++
+
 		var record URLRecord
 		if err := decoder.Decode(&record); err != nil {
-			return fmt.Errorf("ошибка парсинга JSON: %w", err)
+			return fmt.Errorf("ошибка парсинга JSON (запись #%d): %w", lineNum, err)
 		}
+
 		s.data[record.ShortURL] = record
 		s.originalIndex[record.OriginalURL] = record
 		if record.UserID != "" {
 			s.userURLs[record.UserID] = append(s.userURLs[record.UserID], record.ShortURL)
 		}
 	}
+
 	return nil
 }
 
-// TODO это без оптимизации // Init инициализирует хранилище, загружая данные из файла
-// func (s *FileStorage) Init(path string) error {
-// 	s.mu.Lock()
-// 	defer s.mu.Unlock()
+// peekFirstNonSpace возвращает первый непробельный байт из reader,
+// не сдвигая позицию чтения. Если файл пуст — io.EOF.
+func peekFirstNonSpace(reader *bufio.Reader) (byte, error) {
+	for {
+		b, err := reader.Peek(1)
+		if err != nil {
+			return 0, err
+		}
+		if b[0] == ' ' || b[0] == '\t' || b[0] == '\n' || b[0] == '\r' {
+			if _, err := reader.ReadByte(); err != nil {
+				return 0, err
+			}
+			continue
+		}
+		return b[0], nil
+	}
+}
 
-// 	// Пробуем определить: если путь существует и это папка
-// 	if info, err := os.Stat(path); err == nil && info.IsDir() {
-// 		s.filePath = filepath.Join(path, "storage.json")
-// 	} else {
-// 		// Во всех остальных случаях используем путь как есть
-// 		s.filePath = path
-// 	}
-
-// 	if _, err := os.Stat(s.filePath); err == nil {
-// 		fileData, err := os.ReadFile(s.filePath)
-// 		if err != nil {
-// 			return fmt.Errorf("ошибка чтения файла: %w", err)
-// 		}
-
-// 		if len(fileData) > 0 {
-// 			var records []URLRecord
-// 			if err := json.Unmarshal(fileData, &records); err != nil {
-// 				return fmt.Errorf("ошибка парсинга JSON: %w", err)
-// 			}
-
-// 			for _, record := range records {
-// 				s.data[record.ShortURL] = record
-// 				s.originalIndex[record.OriginalURL] = record
-
-// 				// восстанавливаем индекс пользователя
-// 				if record.UserID != "" {
-// 					s.userURLs[record.UserID] = append(s.userURLs[record.UserID], record.ShortURL)
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	return nil
-// }
-
-// Insert добавляет запись в хранилище
+// Insert добавляет пару originalURL→shortURL, привязывая её к userID.
+// Возвращает ErrDuplicateURL, если originalURL уже есть в хранилище.
 func (s *FileStorage) Insert(userID string, originalURL string, shortURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -165,8 +177,9 @@ func (s *FileStorage) Insert(userID string, originalURL string, shortURL string)
 	return s.saveFile()
 }
 
-// BatchInsert добавляет несколько записей в хранилище и возвращает результаты
-// с actual short_url (для дубликатов — существующий, для новых — вставленный)
+// BatchInsert добавляет несколько записей одним вызовом и возвращает результаты
+// в том же порядке с фактическим short_url: для дубликатов — существующий,
+// для новых — вставленный.
 func (s *FileStorage) BatchInsert(userID string, records []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -206,7 +219,7 @@ func (s *FileStorage) BatchInsert(userID string, records []URLRecord) ([]URLReco
 	return results, s.saveFile()
 }
 
-// // TODO это с оптимизацией // saveFile сохраняет данные в файл
+// saveFile сохраняет данные в файл
 func (s *FileStorage) saveFile() error {
 	if s.filePath == "" {
 		return nil
@@ -232,35 +245,7 @@ func (s *FileStorage) saveFile() error {
 	return nil
 }
 
-// TODO это без оптимизации// saveFile сохраняет данные в файл
-// func (s *FileStorage) saveFile() error {
-// 	if s.filePath == "" {
-// 		return nil
-// 	}
-
-// 	dir := filepath.Dir(s.filePath)
-// 	if err := os.MkdirAll(dir, 0755); err != nil {
-// 		return fmt.Errorf("ошибка создания папки: %w", err)
-// 	}
-
-// 	records := make([]URLRecord, 0, len(s.data))
-// 	for _, record := range s.data {
-// 		records = append(records, record)
-// 	}
-
-// 	data, err := json.Marshal(records)
-// 	if err != nil {
-// 		return fmt.Errorf("ошибка сериализации JSON: %w", err)
-// 	}
-
-// 	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
-// 		return fmt.Errorf("ошибка записи в файл: %w", err)
-// 	}
-
-// 	return nil
-// }
-
-// Save сохраняет данные в файл
+// Save записывает все текущие данные в файл; без установленного пути не делает ничего.
 func (s *FileStorage) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -268,12 +253,12 @@ func (s *FileStorage) Save() error {
 	return s.saveFile()
 }
 
-// Close сохраняет данные и закрывает хранилище
+// Close сохраняет данные в файл; хранилище в памяти остаётся пригодным к использованию.
 func (s *FileStorage) Close() error {
 	return s.Save()
 }
 
-// Select возвращает оригинальный URL по короткому
+// Select возвращает запись по короткому адресу и false, если такой записи нет.
 func (s *FileStorage) Select(shortURL string) (URLRecord, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -309,7 +294,8 @@ func (s *FileStorage) SelectByUser(userID string) []URLRecord {
 	return records
 }
 
-// DeleteByUser помечает URL удалёнными (только принадлежащие пользователю)
+// DeleteByUser помечает переданные URL удалёнными, но только принадлежащие userID.
+// Неизвестные или чужие идентификаторы молча пропускаются.
 func (s *FileStorage) DeleteByUser(userID string, shortURLs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

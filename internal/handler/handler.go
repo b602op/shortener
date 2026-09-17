@@ -1,3 +1,4 @@
+// Package handler содержит HTTP-хендлеры и middleware сервиса сокращения URL.
 package handler
 
 import (
@@ -7,6 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// Handler собирает http.Handler из переданных зависимостей: подключает gzip,
+// аутентификацию и зарегистрированные маршруты.
 func Handler(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
 

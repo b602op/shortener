@@ -14,6 +14,10 @@ import (
 	"github.com/b602op/shortener/internal/repository"
 )
 
+// MethodPost возвращает обработчик POST / для тела в формате text/plain.
+// Тело запроса считается исходным URL, короткий адрес — первые 4 байта SHA-256.
+// Ответ: 201 с полным коротким URL, 409 с уже существующим адресом при
+// дубликате, 400 при пустом теле или ошибке чтения, 500 при ошибке сохранения.
 func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос", "uri", req.RequestURI)

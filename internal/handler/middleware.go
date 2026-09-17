@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+// GzipMiddleware распаковывает тело запроса при Content-Encoding: gzip и
+// сжимает ответ, если клиент прислал Accept-Encoding: gzip.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		acceptEncoding := r.Header.Get("Accept-Encoding")
@@ -43,6 +45,8 @@ func GzipMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// GzipResponseWriter — обёртка http.ResponseWriter, сжимающая тело ответа,
+// если Content-Type это JSON или HTML.
 type GzipResponseWriter struct {
 	http.ResponseWriter
 	buffer     *bytes.Buffer
@@ -51,6 +55,7 @@ type GzipResponseWriter struct {
 	shouldGzip bool
 }
 
+// NewGzipResponseWriter создаёт обёртку сжатия над переданным writer.
 func NewGzipResponseWriter(w http.ResponseWriter) *GzipResponseWriter {
 	return &GzipResponseWriter{
 		ResponseWriter: w,
@@ -61,6 +66,8 @@ func NewGzipResponseWriter(w http.ResponseWriter) *GzipResponseWriter {
 	}
 }
 
+// WriteHeader фиксирует статус и решает, сжимать тело: для JSON и HTML
+// устанавливается заголовок Content-Encoding: gzip.
 func (g *GzipResponseWriter) WriteHeader(statusCode int) {
 	contentType := g.Header().Get("Content-Type")
 
@@ -75,6 +82,7 @@ func (g *GzipResponseWriter) WriteHeader(statusCode int) {
 	g.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write пишет байты в gzip-поток либо в исходный writer, если сжатие не требуется.
 func (g *GzipResponseWriter) Write(p []byte) (int, error) {
 	if !g.headerSent {
 		g.WriteHeader(http.StatusOK)
@@ -87,6 +95,7 @@ func (g *GzipResponseWriter) Write(p []byte) (int, error) {
 	return g.ResponseWriter.Write(p)
 }
 
+// Close досчитывает gzip-поток; без сжатия ничего не делает.
 func (g *GzipResponseWriter) Close() error {
 	if g.shouldGzip {
 		return g.gzipWriter.Close()

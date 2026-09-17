@@ -18,6 +18,7 @@ func TestFileObserver_Notify(t *testing.T) {
 
 	obs, err := NewFileObserver(path)
 	require.NoError(t, err)
+	defer obs.Close()
 
 	event1 := Event{TS: 1, Action: ActionShorten, UserID: "u1", URL: "http://example.com/a"}
 	event2 := Event{TS: 2, Action: ActionFollow, UserID: "u1", URL: "http://example.com/a"}
@@ -53,11 +54,13 @@ func TestFileObserver_Appends(t *testing.T) {
 	obs1, err := NewFileObserver(path)
 	require.NoError(t, err)
 	require.NoError(t, obs1.Notify(context.Background(), Event{TS: 1, Action: ActionShorten, URL: "a"}))
+	require.NoError(t, obs1.Close())
 
 	// Второй observer открывает тот же файл и дописывает
 	obs2, err := NewFileObserver(path)
 	require.NoError(t, err)
 	require.NoError(t, obs2.Notify(context.Background(), Event{TS: 2, Action: ActionShorten, URL: "b"}))
+	require.NoError(t, obs2.Close())
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -74,4 +77,38 @@ func countLines(s string) int {
 		}
 	}
 	return n
+}
+
+func TestFileObserver_Close(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+
+	obs, err := NewFileObserver(path)
+	require.NoError(t, err)
+
+	// Записываем событие — файл открыт
+	err = obs.Notify(context.Background(), Event{Action: "test"})
+	require.NoError(t, err)
+
+	// Закрываем
+	require.NoError(t, obs.Close())
+
+	// После Close запись должна возвращать ошибку
+	err = obs.Notify(context.Background(), Event{Action: "after-close"})
+	assert.Error(t, err, "Notify после Close должен вернуть ошибку")
+
+	// Повторный Close безопасен
+	require.NoError(t, obs.Close())
+}
+
+func TestFileObserver_CloseIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+
+	obs, err := NewFileObserver(path)
+	require.NoError(t, err)
+
+	require.NoError(t, obs.Close())
+	require.NoError(t, obs.Close())
+	require.NoError(t, obs.Close())
 }
