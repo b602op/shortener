@@ -40,7 +40,7 @@ func (m *mockObserver) Calls() int {
 
 func TestService_NoObservers(t *testing.T) {
 	svc := NewService()
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	assert.False(t, svc.HasObservers())
 
@@ -50,7 +50,7 @@ func TestService_NoObservers(t *testing.T) {
 
 func TestService_NotifyAll(t *testing.T) {
 	svc := NewService()
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	obs1 := &mockObserver{}
 	obs2 := &mockObserver{}
@@ -69,7 +69,7 @@ func TestService_NotifyAll(t *testing.T) {
 
 func TestService_ContinuesOnError(t *testing.T) {
 	svc := NewService()
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	failing := &mockObserver{err: errors.New("boom")}
 	ok := &mockObserver{}

@@ -24,7 +24,7 @@ func GzipMiddleware(next http.Handler) http.Handler {
 				respondWithError(w, "Ошибка распаковки запроса", http.StatusBadRequest)
 				return
 			}
-			defer gzReader.Close()
+			defer func() { _ = gzReader.Close() }()
 
 			body, err := io.ReadAll(gzReader)
 			if err != nil {
@@ -36,7 +36,7 @@ func GzipMiddleware(next http.Handler) http.Handler {
 
 		if supportsGzip {
 			gzWriter := NewGzipResponseWriter(w)
-			defer gzWriter.Close()
+			defer func() { _ = gzWriter.Close() }()
 
 			next.ServeHTTP(gzWriter, r)
 		} else {

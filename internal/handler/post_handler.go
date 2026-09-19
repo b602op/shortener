@@ -27,7 +27,7 @@ func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNo
 			return
 		}
 
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -52,12 +52,12 @@ func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNo
 		shortHash := hex.EncodeToString(hash[:4])
 
 		// Сохраняем только один раз
-		if err := store.Insert(userID, originalURL, shortHash); err != nil {
+		if err = store.Insert(userID, originalURL, shortHash); err != nil {
 			if errors.Is(err, repository.ErrDuplicateURL) {
 				slog.Warn("Дубликат URL", "url", originalURL)
 				res.Header().Set("Content-Type", "text/plain")
 				res.WriteHeader(http.StatusConflict)
-				res.Write([]byte(cfg.GetBaseURL() + "/" + shortHash))
+				_, _ = res.Write([]byte(cfg.GetBaseURL() + "/" + shortHash))
 				return
 			}
 			slog.Error("Ошибка сохранения", "error", err)
@@ -74,6 +74,6 @@ func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNo
 		// Отправляем ответ
 		res.Header().Set("Content-Type", "text/plain")
 		res.WriteHeader(http.StatusCreated)
-		res.Write([]byte(shortURL))
+		_, _ = res.Write([]byte(shortURL))
 	}
 }

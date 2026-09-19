@@ -166,7 +166,8 @@ func TestMethodPostBatchAPI_DuplicateURL(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec1.Code)
 
 	var resp1 []BatchShortenResponse
-	json.NewDecoder(rec1.Body).Decode(&resp1)
+	err := json.NewDecoder(rec1.Body).Decode(&resp1)
+	require.NoError(t, err)
 	existingShortURL := resp1[0].ShortURL
 
 	// Теперь батч: один новый + один дубликат
@@ -185,7 +186,7 @@ func TestMethodPostBatchAPI_DuplicateURL(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec2.Code)
 
 	var resp2 []BatchShortenResponse
-	err := json.NewDecoder(rec2.Body).Decode(&resp2)
+	err = json.NewDecoder(rec2.Body).Decode(&resp2)
 	require.NoError(t, err)
 	require.Len(t, resp2, 2)
 

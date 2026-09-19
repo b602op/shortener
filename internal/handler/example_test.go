@@ -39,7 +39,7 @@ func ExampleHandler_shortenPOST() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	fmt.Println(resp.StatusCode)
 	// Output: 201
@@ -68,7 +68,7 @@ func ExampleHandler_shortenAPI() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var shortenResp handler.ShortenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&shortenResp); err != nil {
@@ -116,7 +116,7 @@ func ExampleHandler_batchShorten() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var responses []handler.BatchShortenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&responses); err != nil {
@@ -156,7 +156,7 @@ func ExampleHandler_redirect() {
 	}
 
 	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -177,7 +177,7 @@ func ExampleHandler_redirect() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer redirectResp.Body.Close()
+	defer func() { _ = redirectResp.Body.Close() }()
 
 	fmt.Println(redirectResp.StatusCode)
 	fmt.Println(redirectResp.Header.Get("Location"))
@@ -216,14 +216,14 @@ func ExampleHandler_userURLs() {
 		fmt.Println("error:", err)
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	listResp, err := client.Get(srv.URL + "/api/user/urls")
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
-	defer listResp.Body.Close()
+	defer func() { _ = listResp.Body.Close() }()
 
 	// Ответ приходит как массив объектов, тип хендлера не экспортируется.
 	var urls []struct {
@@ -249,7 +249,7 @@ func ExampleHandler_deleteUserURLs() {
 	authService := auth.NewService("test-secret")
 	auditService := audit.NewService()
 	deleteService := worker.NewDeleteService(store, worker.DefaultConfig())
-	defer deleteService.Close()
+	defer func() { _ = deleteService.Close() }()
 
 	deps := handler.Dependencies{
 		Config:        cfg,
@@ -277,7 +277,7 @@ func ExampleHandler_deleteUserURLs() {
 	}
 
 	shortBody, err := io.ReadAll(createResp.Body)
-	createResp.Body.Close()
+	_ = createResp.Body.Close()
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -303,7 +303,7 @@ func ExampleHandler_deleteUserURLs() {
 		fmt.Println("error:", err)
 		return
 	}
-	defer deleteResp.Body.Close()
+	defer func() { _ = deleteResp.Body.Close() }()
 
 	// 202 — запрос принят, фактическое удаление произойдёт позже.
 	fmt.Println(deleteResp.StatusCode)

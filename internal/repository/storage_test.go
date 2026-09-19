@@ -23,7 +23,7 @@ func TestNewFileStorage(t *testing.T) {
 // TestStorage_Init_LoadExistingFile проверяет загрузку из существующего файла
 func TestStorage_Init_LoadExistingFile(t *testing.T) {
 	testFile := "test_storage_load.json"
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	records := []URLRecord{
 		{
@@ -41,7 +41,7 @@ func TestStorage_Init_LoadExistingFile(t *testing.T) {
 	// Записываем в формате JSON-lines (по одному объекту на строку)
 	f, err := os.Create(testFile)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	enc := json.NewEncoder(f)
 	for _, r := range records {
@@ -66,7 +66,7 @@ func TestStorage_Init_LoadExistingFile(t *testing.T) {
 // TestStorage_Init_FileNotExists проверяет, что если файла нет, ошибки не будет
 func TestStorage_Init_FileNotExists(t *testing.T) {
 	testFile := "nonexistent_file.json"
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	storage := NewFileStorage()
 	err := storage.Init(testFile)
@@ -78,7 +78,7 @@ func TestStorage_Init_FileNotExists(t *testing.T) {
 // TestStorage_Save проверяет вставку данных (Save удалён из FileStorage)
 func TestStorage_Save(t *testing.T) {
 	testFile := "test_storage_save.json"
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	storage := NewFileStorage()
 
@@ -160,7 +160,7 @@ func TestStorage_Concurrent(t *testing.T) {
 // TestStorage_Init_EmptyFile проверяет загрузку пустого файла
 func TestStorage_Init_EmptyFile(t *testing.T) {
 	testFile := "empty_file.json"
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	err := os.WriteFile(testFile, []byte{}, 0644)
 	require.NoError(t, err)
@@ -175,7 +175,7 @@ func TestStorage_Init_EmptyFile(t *testing.T) {
 // TestStorage_Init_InvalidJSON проверяет обработку битого JSON
 func TestStorage_Init_InvalidJSON(t *testing.T) {
 	testFile := "invalid_json.json"
-	defer os.Remove(testFile)
+	defer func() { _ = os.Remove(testFile) }()
 
 	err := os.WriteFile(testFile, []byte("{это не json"), 0644)
 	require.NoError(t, err)
@@ -200,4 +200,118 @@ func TestStorage_InsertDuplicate(t *testing.T) {
 	found, ok := storage.Select("test")
 	assert.True(t, ok)
 	assert.Equal(t, "http://second.com", found.OriginalURL)
+}
+
+// TestStorage_BatchInsert проверяет пакетную вставку с дубликатами
+func TestStorage_BatchInsert(t *testing.T) {
+	storage := NewFileStorage()
+
+	records := []URLRecord{
+		{OriginalURL: "http://one.com", ShortURL: "short1"},
+		{OriginalURL: "http://two.com", ShortURL: "short2"},
+	}
+
+	results, err := storage.BatchInsert("user-1", records)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "http://one.com", results[0].OriginalURL)
+	assert.Equal(t, "user-1", results[0].UserID)
+
+	// Повторная вставка с дубликатом: возвращается существующая запись
+	dup := []URLRecord{
+		{OriginalURL: "http://one.com", ShortURL: "other-short"},
+		{OriginalURL: "http://three.com", ShortURL: "short3"},
+	}
+	results, err = storage.BatchInsert("user-2", dup)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "short1", results[0].ShortURL, "дубликат должен вернуть существующий short_url")
+	assert.Equal(t, "user-1", results[0].UserID, "дубликат должен вернуть исходного владельца")
+	assert.Equal(t, "user-2", results[1].UserID)
+}
+
+// TestStorage_SaveAndClose проверяет сохранение в файл через Save и Close
+func TestStorage_SaveAndClose(t *testing.T) {
+	testFile := "test_storage_save_close.json"
+	defer func() { _ = os.Remove(testFile) }()
+
+	storage := NewFileStorage()
+	err := storage.Init(testFile)
+	require.NoError(t, err)
+
+	err = storage.Insert("user-1", "http://example.com", "save1")
+	require.NoError(t, err)
+
+	err = storage.Save()
+	require.NoError(t, err)
+
+	// Файл должен существовать и содержать запись
+	_, err = os.Stat(testFile)
+	require.NoError(t, err)
+
+	// Close сохраняет данные и не возвращает ошибку
+	err = storage.Close()
+	require.NoError(t, err)
+
+	// Проверяем, что данные читаются из файла
+	reloaded := NewFileStorage()
+	err = reloaded.Init(testFile)
+	require.NoError(t, err)
+	record, ok := reloaded.Select("save1")
+	require.True(t, ok)
+	assert.Equal(t, "http://example.com", record.OriginalURL)
+}
+
+// TestStorage_SelectByUser проверяет выборку URL пользователя
+func TestStorage_SelectByUser(t *testing.T) {
+	storage := NewFileStorage()
+
+	_, err := storage.BatchInsert("user-1", []URLRecord{
+		{OriginalURL: "http://one.com", ShortURL: "short1"},
+		{OriginalURL: "http://two.com", ShortURL: "short2"},
+	})
+	require.NoError(t, err)
+	_, err = storage.BatchInsert("user-2", []URLRecord{
+		{OriginalURL: "http://three.com", ShortURL: "short3"},
+	})
+	require.NoError(t, err)
+
+	// Только свои URL
+	got := storage.SelectByUser("user-1")
+	assert.Len(t, got, 2)
+
+	// Незнакомый пользователь — пустой список
+	got = storage.SelectByUser("nobody")
+	assert.Empty(t, got)
+
+	// Удалённые URL не возвращаются
+	err = storage.DeleteByUser("user-1", []string{"short1"})
+	require.NoError(t, err)
+	got = storage.SelectByUser("user-1")
+	assert.Len(t, got, 1)
+	assert.Equal(t, "short2", got[0].ShortURL)
+}
+
+// TestStorage_DeleteByUser проверяет удаление только своих URL
+func TestStorage_DeleteByUser(t *testing.T) {
+	storage := NewFileStorage()
+
+	_, err := storage.BatchInsert("user-1", []URLRecord{
+		{OriginalURL: "http://one.com", ShortURL: "short1"},
+	})
+	require.NoError(t, err)
+
+	// Чужой пользователь не может удалить
+	err = storage.DeleteByUser("user-2", []string{"short1"})
+	require.NoError(t, err)
+	record, ok := storage.Select("short1")
+	require.True(t, ok)
+	assert.False(t, record.DeletedFlag, "чужой URL не должен быть удалён")
+
+	// Владелец удаляет
+	err = storage.DeleteByUser("user-1", []string{"short1", "unknown"})
+	require.NoError(t, err)
+	record, ok = storage.Select("short1")
+	require.True(t, ok)
+	assert.True(t, record.DeletedFlag, "свой URL должен быть помечен удалённым")
 }

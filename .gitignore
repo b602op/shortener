@@ -25,3 +25,11 @@ vendor/
 # Данные хранилища
 data/storage.json
 data/*.json
+
+# Multichecker binary
+staticlint
+staticlint.exe
+
+# Test artifacts
+test_storage*.json
+test_storage_insert.json

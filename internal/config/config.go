@@ -95,7 +95,7 @@ func (c *Config) createStore() (repository.Store, error) {
 			return nil, fmt.Errorf("ошибка создания хранилища PostgreSQL: %w", err)
 		}
 		if err := dbStore.Init(); err != nil {
-			dbStore.Close()
+			_ = dbStore.Close()
 			return nil, fmt.Errorf("ошибка инициализации хранилища PostgreSQL: %w", err)
 		}
 		return dbStore, nil

@@ -38,7 +38,7 @@ func MethodPostAPI(cfg *config.Config, store repository.Store, auditService Audi
 			return
 		}
 
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -47,7 +47,7 @@ func MethodPostAPI(cfg *config.Config, store repository.Store, auditService Audi
 		}
 
 		var shortenReq ShortenRequest
-		if err := json.Unmarshal(body, &shortenReq); err != nil {
+		if err = json.Unmarshal(body, &shortenReq); err != nil {
 			respondWithError(res, "Неверный формат JSON", http.StatusBadRequest)
 			return
 		}
@@ -68,12 +68,12 @@ func MethodPostAPI(cfg *config.Config, store repository.Store, auditService Audi
 		userID, _ := auth.GetUserIDFromContext(req.Context())
 
 		// Сохраняем через переданный store
-		if err := store.Insert(userID, shortenReq.URL, shortHash); err != nil {
+		if err = store.Insert(userID, shortenReq.URL, shortHash); err != nil {
 			if errors.Is(err, repository.ErrDuplicateURL) {
 				slog.Warn("Дубликат URL", "url", shortenReq.URL)
 				res.Header().Set("Content-Type", "application/json")
 				res.WriteHeader(http.StatusConflict)
-				json.NewEncoder(res).Encode(ShortenResponse{Result: cfg.GetBaseURL() + "/" + shortHash})
+				_ = json.NewEncoder(res).Encode(ShortenResponse{Result: cfg.GetBaseURL() + "/" + shortHash})
 				return
 			}
 			slog.Error("Ошибка сохранения", "error", err)
@@ -94,6 +94,6 @@ func MethodPostAPI(cfg *config.Config, store repository.Store, auditService Audi
 
 		res.Header().Set("Content-Type", "application/json")
 		res.WriteHeader(http.StatusCreated)
-		res.Write(respBody)
+		_, _ = res.Write(respBody)
 	}
 }
