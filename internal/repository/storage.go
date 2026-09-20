@@ -16,6 +16,8 @@ import (
 
 // URLRecord — запись о сокращённой ссылке: идентификаторы, исходный адрес,
 // владелец и признак удаления.
+//
+// generate:reset
 type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`

@@ -16,6 +16,8 @@ import (
 var ErrQueueFull = errors.New("delete queue is full")
 
 // DeleteTask — задача на удаление одной короткой ссылки у указанного пользователя.
+//
+// generate:reset
 type DeleteTask struct {
 	UserID   string
 	ShortURL string

@@ -1,3 +1,5 @@
+//go:generate go run ../../cmd/reset -dir ../..
+
 package main
 
 import (
