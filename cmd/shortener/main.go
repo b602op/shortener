@@ -80,7 +80,7 @@ func getSecretKey() (string, error) {
 
 func main() {
 	if err := run(); err != nil {
-		log.Printf("Ошибка: %v", err)
+		log.Fatalf("Ошибка: %v", err)
 	}
 }
 
