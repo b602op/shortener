@@ -13,6 +13,8 @@ const (
 )
 
 // Event — событие аудита: момент, действие, пользователь и исходный URL.
+//
+// generate:reset
 type Event struct {
 	TS     int64  `json:"ts"`
 	Action Action `json:"action"`

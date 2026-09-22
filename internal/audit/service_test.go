@@ -38,6 +38,23 @@ func (m *mockObserver) Calls() int {
 	return len(m.events)
 }
 
+// TestEvent_Reset проверяет сгенерированный метод Reset для Event.
+func TestEvent_Reset(t *testing.T) {
+	event := Event{
+		TS:     123,
+		Action: ActionShorten,
+		UserID: "user-1",
+		URL:    "http://example.com",
+	}
+
+	event.Reset()
+	assert.Equal(t, Event{}, event, "Reset должен обнулить все поля события")
+
+	// nil-ресивер не паникует
+	var nilEvent *Event
+	nilEvent.Reset()
+}
+
 func TestService_NoObservers(t *testing.T) {
 	svc := NewService()
 	defer func() { _ = svc.Close() }()

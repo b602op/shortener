@@ -43,3 +43,15 @@ func TestDeleteService_DeleteBatch(t *testing.T) {
 	err = svc.DeleteBatch("user", []string{"short4"})
 	assert.ErrorIs(t, err, ErrQueueFull)
 }
+
+// TestDeleteTask_Reset проверяет сгенерированный метод Reset для DeleteTask.
+func TestDeleteTask_Reset(t *testing.T) {
+	task := DeleteTask{UserID: "user-1", ShortURL: "abc123"}
+
+	task.Reset()
+	assert.Equal(t, DeleteTask{}, task, "Reset должен обнулить все поля задачи")
+
+	// nil-ресивер не паникует
+	var nilTask *DeleteTask
+	nilTask.Reset()
+}

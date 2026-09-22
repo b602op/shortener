@@ -294,6 +294,7 @@ func TestStorage_SelectByUser(t *testing.T) {
 
 // TestStorage_DeleteByUser проверяет удаление только своих URL
 func TestStorage_DeleteByUser(t *testing.T) {
+
 	storage := NewFileStorage()
 
 	_, err := storage.BatchInsert("user-1", []URLRecord{
@@ -314,4 +315,22 @@ func TestStorage_DeleteByUser(t *testing.T) {
 	record, ok = storage.Select("short1")
 	require.True(t, ok)
 	assert.True(t, record.DeletedFlag, "свой URL должен быть помечен удалённым")
+}
+
+// TestURLRecord_Reset проверяет сгенерированный метод Reset для URLRecord.
+func TestURLRecord_Reset(t *testing.T) {
+	rec := URLRecord{
+		UUID:        "uuid-1",
+		ShortURL:    "abc123",
+		OriginalURL: "http://example.com",
+		UserID:      "user-1",
+		DeletedFlag: true,
+	}
+
+	rec.Reset()
+	assert.Equal(t, URLRecord{}, rec, "Reset должен обнулить все поля записи")
+
+	// nil-ресивер не паникует
+	var nilRec *URLRecord
+	nilRec.Reset()
 }

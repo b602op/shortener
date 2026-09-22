@@ -26,9 +26,13 @@ vendor/
 data/storage.json
 data/*.json
 
-# Multichecker binary
-staticlint
-staticlint.exe
+# Multichecker binary (только в корне репозитория)
+/staticlint
+/staticlint.exe
+
+# Reset generator binary (только в корне репозитория)
+/reset
+/reset.exe
 
 # Test artifacts
 test_storage*.json
