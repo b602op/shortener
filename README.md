@@ -74,3 +74,54 @@ Build commit: abc1234
 ```
 
 Если переменные не заданы — выводится `N/A`.
+
+## HTTPS
+
+### Генерация самоподписанного сертификата
+
+```bash
+make certs
+```
+
+Или вручную:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:4096 \
+  -keyout certs/key.pem \
+  -out certs/cert.pem \
+  -days 365 \
+  -nodes \
+  -subj "/CN=localhost"
+chmod 600 certs/key.pem
+```
+
+### Запуск с HTTPS
+
+```bash
+# Через флаг
+./shortener -s
+
+# Через переменную окружения
+ENABLE_HTTPS=true ./shortener
+
+# С кастомными путями
+./shortener -s -tls-cert ./my/cert.pem -tls-key ./my/key.pem
+```
+
+> **Важно:** пути по умолчанию (`./certs/cert.pem`, `./certs/key.pem`) — относительные,
+> поэтому запускайте бинарник из корня проекта либо передавайте абсолютные пути
+> через флаги `-tls-cert` / `-tls-key` или env `TLS_CERT_FILE` / `TLS_KEY_FILE`.
+
+### Конфигурация
+
+| Параметр | Флаг | Env | По умолчанию |
+|---|---|---|---|
+| Включить HTTPS | `-s` | `ENABLE_HTTPS` | `false` |
+| Путь к сертификату | `-tls-cert` | `TLS_CERT_FILE` | `./certs/cert.pem` |
+| Путь к ключу | `-tls-key` | `TLS_KEY_FILE` | `./certs/key.pem` |
+
+Значения `ENABLE_HTTPS`: `true`, `1`, `yes` (регистр не важен) — включают HTTPS,
+любое другое значение — выключает. Флаг `-s` перекрывает переменную окружения.
+
+Сертификаты не коммитятся в git (добавлены в `.gitignore`).

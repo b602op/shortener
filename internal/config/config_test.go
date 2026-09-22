@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/b602op/shortener/internal/repository"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewTest(t *testing.T) {
@@ -169,4 +170,97 @@ func TestConfigSimpleGetters(t *testing.T) {
 	if got := cfg.GetDatabaseDSN(); got != "postgres://localhost/db" {
 		t.Errorf("GetDatabaseDSN() = %q, want 'postgres://localhost/db'", got)
 	}
+}
+
+func TestParseBoolEnv(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"true", "true", true},
+		{"TRUE", "TRUE", true},
+		{"1", "1", true},
+		{"yes", "yes", true},
+		{"YES", "YES", true},
+		{"false", "false", false},
+		{"0", "0", false},
+		{"no", "no", false},
+		{"empty", "", false},
+		{"garbage", "maybe", false},
+		{"with spaces", "  true  ", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TEST_BOOL_ENV", tt.value)
+			got := parseBoolEnv("TEST_BOOL_ENV")
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetEnableHTTPS(t *testing.T) {
+	t.Run("флаг -s перекрывает env со значением false", func(t *testing.T) {
+		t.Setenv("ENABLE_HTTPS", "false")
+		assert.True(t, getEnableHTTPS(true), "включённый флаг -s должен перекрыть env")
+	})
+
+	t.Run("env включает при выключенном флаге", func(t *testing.T) {
+		t.Setenv("ENABLE_HTTPS", "true")
+		assert.True(t, getEnableHTTPS(false))
+	})
+
+	t.Run("всё выключено", func(t *testing.T) {
+		t.Setenv("ENABLE_HTTPS", "false")
+		assert.False(t, getEnableHTTPS(false))
+	})
+}
+
+func TestGetTLSFilePath(t *testing.T) {
+	tests := []struct {
+		name         string
+		flagValue    string
+		envValue     string
+		defaultValue string
+		want         string
+	}{
+		{"флаг перекрывает env", "/tmp/flag.pem", "/tmp/env.pem", "/tmp/default.pem", "/tmp/flag.pem"},
+		{"env при пустом флаге", "", "/tmp/env.pem", "/tmp/default.pem", "/tmp/env.pem"},
+		{"дефолт при пустых флаге и env", "", "", "/tmp/default.pem", "/tmp/default.pem"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue != "" {
+				t.Setenv("TEST_TLS_FILE", tt.envValue)
+			} else {
+				t.Setenv("TEST_TLS_FILE", "")
+			}
+
+			got := getTLSFilePath(tt.flagValue, "TEST_TLS_FILE", tt.defaultValue)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTLSDefaultPaths(t *testing.T) {
+	// Дефолтные пути к сертификатам при незаданных флагах и env
+	t.Setenv("TLS_CERT_FILE", "")
+	t.Setenv("TLS_KEY_FILE", "")
+
+	assert.Equal(t, defaultTLSCertFile, getTLSFilePath("", "TLS_CERT_FILE", defaultTLSCertFile))
+	assert.Equal(t, defaultTLSKeyFile, getTLSFilePath("", "TLS_KEY_FILE", defaultTLSKeyFile))
+}
+
+func TestHTTPSGetters(t *testing.T) {
+	cfg := &Config{
+		EnableHTTPS: true,
+		TLSCertFile: "/tmp/cert.pem",
+		TLSKeyFile:  "/tmp/key.pem",
+	}
+
+	assert.True(t, cfg.GetEnableHTTPS())
+	assert.Equal(t, "/tmp/cert.pem", cfg.GetTLSCertFile())
+	assert.Equal(t, "/tmp/key.pem", cfg.GetTLSKeyFile())
 }

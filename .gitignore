@@ -42,3 +42,7 @@ bin/
 # Test artifacts
 test_storage*.json
 test_storage_insert.json
+
+# TLS-сертификаты
+certs/*.pem
+*.pem

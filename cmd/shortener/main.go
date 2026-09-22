@@ -20,6 +20,7 @@ import (
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/handler"
+	"github.com/b602op/shortener/internal/repository"
 	"github.com/b602op/shortener/internal/worker"
 )
 
@@ -94,13 +95,7 @@ func run() error {
 
 	// === Ресурсы, требующие Close ===
 	var closers []io.Closer
-	defer func() {
-		for i := len(closers) - 1; i >= 0; i-- {
-			if cerr := closers[i].Close(); cerr != nil {
-				log.Printf("Ошибка закрытия ресурса: %v", cerr)
-			}
-		}
-	}()
+	defer closeAll(closers)
 
 	store := cfg.GetStorage()
 	if closer, ok := store.(io.Closer); ok {
@@ -121,55 +116,18 @@ func run() error {
 	authService := auth.NewService(secretKey)
 
 	// === Аудит ===
-	auditService := audit.NewService()
-	closers = append(closers, auditService)
-
-	if cfg.AuditFile != "" {
-		fileObs, obsErr := audit.NewFileObserver(cfg.AuditFile)
-		if obsErr != nil {
-			return obsErr
-		}
-		closers = append(closers, fileObs)
-		auditService.Subscribe(fileObs)
-		log.Printf("Аудит в файл: %s", cfg.AuditFile)
-	}
-
-	if cfg.AuditURL != "" {
-		httpObs := audit.NewHTTPObserver(cfg.AuditURL)
-		auditService.Subscribe(httpObs)
-		log.Printf("Аудит на сервер: %s", cfg.AuditURL)
-	}
-
-	if cfg.AuditFile == "" && cfg.AuditURL == "" {
-		log.Println("Аудит отключён")
+	auditService, err := setupAudit(cfg, &closers)
+	if err != nil {
+		return err
 	}
 
 	// === Worker ===
-	workerCfg := worker.Config{
-		WorkerCount:    cfg.DeleteWorkerCount,
-		QueueSize:      cfg.DeleteQueueSize,
-		BufferSize:     cfg.DeleteBufferSize,
-		FlushInterval:  cfg.DeleteFlushInterval,
-		EnqueueTimeout: cfg.DeleteEnqueueTimeout,
-	}
-	deleteService := worker.NewDeleteService(store, workerCfg)
+	deleteService := setupWorker(cfg, store)
 	closers = append(closers, deleteService)
 
 	// === HTTP-сервер ===
-	deps := handler.Dependencies{
-		Config:        cfg,
-		Store:         store,
-		AuthService:   authService,
-		DeleteService: deleteService,
-		AuditService:  auditService,
-	}
-
-	httpHandler := handler.Handler(deps)
-
-	server := &http.Server{
-		Addr:    addr,
-		Handler: httpHandler,
-	}
+	httpHandler := setupHandler(cfg, store, authService, deleteService, auditService)
+	server := &http.Server{Addr: addr, Handler: httpHandler}
 
 	// === Контекст с сигналом ===
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -177,12 +135,7 @@ func run() error {
 
 	// === Запуск сервера ===
 	serverErr := make(chan error, 1)
-	go func() {
-		log.Printf("HTTP-сервер слушает %s", addr)
-		if srvErr := server.ListenAndServe(); srvErr != nil && !errors.Is(srvErr, http.ErrServerClosed) {
-			serverErr <- srvErr
-		}
-	}()
+	go serveServer(server, cfg, addr, serverErr)
 
 	// === Ожидание сигнала или ошибки сервера ===
 	select {
@@ -203,4 +156,106 @@ func run() error {
 
 	log.Println("Сервер завершил работу")
 	return nil
+}
+
+// closeAll закрывает ресурсы в обратном порядке, логируя ошибки.
+func closeAll(closers []io.Closer) {
+	for i := len(closers) - 1; i >= 0; i-- {
+		if err := closers[i].Close(); err != nil {
+			log.Printf("Ошибка закрытия ресурса: %v", err)
+		}
+	}
+}
+
+// setupAudit создаёт сервис аудита и подписывает observers согласно конфигу.
+func setupAudit(cfg *config.Config, closers *[]io.Closer) (*audit.Service, error) {
+	svc := audit.NewService()
+	*closers = append(*closers, svc)
+
+	if cfg.AuditFile != "" {
+		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return nil, err
+		}
+		*closers = append(*closers, fileObs)
+		svc.Subscribe(fileObs)
+		log.Printf("Аудит в файл: %s", cfg.AuditFile)
+	}
+
+	if cfg.AuditURL != "" {
+		httpObs := audit.NewHTTPObserver(cfg.AuditURL)
+		svc.Subscribe(httpObs)
+		log.Printf("Аудит на сервер: %s", cfg.AuditURL)
+	}
+
+	if cfg.AuditFile == "" && cfg.AuditURL == "" {
+		log.Println("Аудит отключён")
+	}
+
+	return svc, nil
+}
+
+// setupWorker создаёт сервис асинхронного удаления.
+func setupWorker(cfg *config.Config, store repository.Store) *worker.DeleteService {
+	workerCfg := worker.Config{
+		WorkerCount:    cfg.DeleteWorkerCount,
+		QueueSize:      cfg.DeleteQueueSize,
+		BufferSize:     cfg.DeleteBufferSize,
+		FlushInterval:  cfg.DeleteFlushInterval,
+		EnqueueTimeout: cfg.DeleteEnqueueTimeout,
+	}
+	return worker.NewDeleteService(store, workerCfg)
+}
+
+// setupHandler создаёт HTTP-обработчик со всеми зависимостями.
+func setupHandler(
+	cfg *config.Config,
+	store repository.Store,
+	authService *auth.Service,
+	deleteService *worker.DeleteService,
+	auditService *audit.Service,
+) http.Handler {
+	deps := handler.Dependencies{
+		Config:        cfg,
+		Store:         store,
+		AuthService:   authService,
+		DeleteService: deleteService,
+		AuditService:  auditService,
+	}
+	return handler.Handler(deps)
+}
+
+// serveServer запускает HTTP или HTTPS сервер в зависимости от конфигурации.
+// Ошибки отправляются в канал serverErr.
+func serveServer(server *http.Server, cfg *config.Config, addr string, serverErr chan<- error) {
+	if cfg.GetEnableHTTPS() {
+		certFile := cfg.GetTLSCertFile()
+		keyFile := cfg.GetTLSKeyFile()
+
+		if _, statErr := os.Stat(certFile); os.IsNotExist(statErr) {
+			serverErr <- fmt.Errorf(
+				"TLS-сертификат не найден по пути '%s'. Запустите 'make certs' для генерации",
+				certFile,
+			)
+			return
+		}
+		if _, statErr := os.Stat(keyFile); os.IsNotExist(statErr) {
+			serverErr <- fmt.Errorf(
+				"TLS-ключ не найден по пути '%s'. Запустите 'make certs' для генерации",
+				keyFile,
+			)
+			return
+		}
+
+		log.Printf("HTTPS-сервер слушает %s (cert: %s)", addr, certFile)
+		if err := server.ListenAndServeTLS(certFile, keyFile); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+		return
+	}
+
+	log.Printf("HTTP-сервер слушает %s", addr)
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		serverErr <- err
+	}
 }
