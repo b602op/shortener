@@ -32,7 +32,7 @@ func TestAuthMiddleware_IssuesCookie(t *testing.T) {
 
 	// Закрываем тело ответа
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Кука должна быть выдана
 	cookies := resp.Cookies()
@@ -60,7 +60,7 @@ func TestAuthMiddleware_KeepsValidCookie(t *testing.T) {
 
 	// Закрываем тело первого ответа
 	firstResp := firstRec.Result()
-	defer firstResp.Body.Close()
+	defer func() { _ = firstResp.Body.Close() }()
 	cookie := firstResp.Cookies()[0]
 
 	// Повторный запрос с той же кукой — новая кука не выдаётся
@@ -78,7 +78,7 @@ func TestAuthMiddleware_KeepsValidCookie(t *testing.T) {
 
 	// Закрываем тело второго ответа
 	secondResp := secondRec.Result()
-	defer secondResp.Body.Close()
+	defer func() { _ = secondResp.Body.Close() }()
 
 	assert.Empty(t, secondResp.Cookies(), "кука не должна перевыдаваться")
 

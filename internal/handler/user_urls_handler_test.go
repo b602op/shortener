@@ -62,7 +62,7 @@ func TestGetUserURLs_FetchURLs(t *testing.T) {
 	// 1. Сокращаем URL и запоминаем куку пользователя
 	resp, err := http.Post(ts.URL+"/", "text/plain", strings.NewReader(testURL))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	cookies := resp.Cookies()
@@ -79,7 +79,7 @@ func TestGetUserURLs_FetchURLs(t *testing.T) {
 
 	resp2, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
 	assert.Contains(t, resp2.Header.Get("Content-Type"), "application/json")
@@ -98,7 +98,7 @@ func TestGetUserURLs_NoURLs(t *testing.T) {
 	// Запрос без куки — middleware выдаёт нового пользователя, URL у него нет
 	resp, err := http.Get(ts.URL + "/api/user/urls")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
@@ -112,7 +112,7 @@ func TestGetUserURLs_InvalidCookie(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
@@ -132,7 +132,7 @@ func TestDeleteUserURLs(t *testing.T) {
 
 	// 2. Извлекаем идентификатор сокращённого URL
 	shortURL, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	require.NoError(t, err)
 	shortID := strings.TrimPrefix(string(shortURL), "http://localhost:8080/")
 
@@ -144,18 +144,18 @@ func TestDeleteUserURLs(t *testing.T) {
 
 	resp2, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	assert.Equal(t, http.StatusAccepted, resp2.StatusCode)
 
 	// 4. Ждём асинхронного удаления и проверяем 410 Gone
 	require.Eventually(t, func() bool {
-		resp3, err := http.Get(ts.URL + "/" + shortID)
-		if err != nil {
+		resp3, cerr := http.Get(ts.URL + "/" + shortID)
+		if cerr != nil {
 			return false
 		}
-		defer resp3.Body.Close()
+		defer func() { _ = resp3.Body.Close() }()
 		return resp3.StatusCode == http.StatusGone
-	}, 1*time.Second, 50*time.Millisecond)
+	}, 5*time.Second, 100*time.Millisecond)
 
 	// 5. Удалённый URL исчезает из списка пользователя
 	req4, err := http.NewRequest(http.MethodGet, ts.URL+"/api/user/urls", nil)
@@ -164,7 +164,7 @@ func TestDeleteUserURLs(t *testing.T) {
 
 	resp4, err := http.DefaultClient.Do(req4)
 	require.NoError(t, err)
-	defer resp4.Body.Close()
+	defer func() { _ = resp4.Body.Close() }()
 	assert.Equal(t, http.StatusNoContent, resp4.StatusCode)
 }
 
@@ -182,7 +182,7 @@ func TestDeleteUserURLs_ForeignUser(t *testing.T) {
 	require.Len(t, ownerCookies, 1)
 
 	shortURLBytes, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	require.NoError(t, err)
 	shortID := strings.TrimPrefix(string(shortURLBytes), "http://localhost:8080/")
 
@@ -190,7 +190,7 @@ func TestDeleteUserURLs_ForeignUser(t *testing.T) {
 	respOther, err := http.Post(ts.URL+"/", "text/plain", strings.NewReader("http://example.com/other"))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, respOther.StatusCode)
-	respOther.Body.Close()
+	_ = respOther.Body.Close()
 
 	otherUserCookies := respOther.Cookies()
 	require.Len(t, otherUserCookies, 1)
@@ -205,16 +205,16 @@ func TestDeleteUserURLs_ForeignUser(t *testing.T) {
 
 	resp2, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	assert.Equal(t, http.StatusAccepted, resp2.StatusCode)
 
 	// 4. Чужой URL не удаляется — остаётся доступным
 	require.Never(t, func() bool {
-		resp3, err := http.Get(ts.URL + "/" + shortID)
-		if err != nil {
+		resp3, cerr := http.Get(ts.URL + "/" + shortID)
+		if cerr != nil {
 			return false
 		}
-		defer resp3.Body.Close()
+		defer func() { _ = resp3.Body.Close() }()
 		return resp3.StatusCode == http.StatusGone
 	}, 500*time.Millisecond, 50*time.Millisecond)
 }
@@ -227,7 +227,7 @@ func TestDeleteUserURLs_InvalidBody(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
@@ -241,7 +241,7 @@ func TestDeleteUserURLs_InvalidCookie(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }

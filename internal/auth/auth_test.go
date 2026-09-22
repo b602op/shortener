@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -78,7 +79,7 @@ func TestCookieRoundTrip(t *testing.T) {
 
 	// Закрываем тело ответа
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Получаем куку из ответа
 	cookies := resp.Cookies()
@@ -111,4 +112,56 @@ func TestGetUserID_InvalidCookie(t *testing.T) {
 
 	_, ok := svc.GetUserIDFromCookie(req)
 	assert.False(t, ok)
+}
+
+func TestBuildJWTString(t *testing.T) {
+	svc := NewService("test-secret")
+
+	token, err := svc.BuildJWTString()
+	require.NoError(t, err)
+
+	userID, err := svc.Verify(token)
+	require.NoError(t, err)
+	assert.NotEmpty(t, userID)
+}
+
+func TestHasCookie(t *testing.T) {
+	svc := NewService("test-secret")
+
+	reqWithout := httptest.NewRequest(http.MethodGet, "/", nil)
+	assert.False(t, svc.HasCookie(reqWithout))
+
+	reqWith := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqWith.AddCookie(&http.Cookie{Name: CookieName, Value: "any-value"})
+	assert.True(t, svc.HasCookie(reqWith))
+}
+
+func TestSetUserIDCookie(t *testing.T) {
+	svc := NewService("test-secret")
+
+	rec := httptest.NewRecorder()
+	svc.SetUserIDCookie(rec)
+
+	resp := rec.Result()
+	defer func() { _ = resp.Body.Close() }()
+
+	cookies := resp.Cookies()
+	require.Len(t, cookies, 1)
+
+	// Кука содержит валидный токен с каким-то userID
+	userID, err := svc.Verify(cookies[0].Value)
+	require.NoError(t, err)
+	assert.NotEmpty(t, userID)
+}
+
+func TestContextUserID(t *testing.T) {
+	// Пустой контекст — значения нет
+	_, ok := GetUserIDFromContext(context.Background())
+	assert.False(t, ok)
+
+	// Контекст со значением — читаем обратно
+	ctx := ContextWithUserID(context.Background(), "user-42")
+	got, ok := GetUserIDFromContext(ctx)
+	require.True(t, ok)
+	assert.Equal(t, "user-42", got)
 }

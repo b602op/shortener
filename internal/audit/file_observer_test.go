@@ -18,7 +18,7 @@ func TestFileObserver_Notify(t *testing.T) {
 
 	obs, err := NewFileObserver(path)
 	require.NoError(t, err)
-	defer obs.Close()
+	defer func() { _ = obs.Close() }()
 
 	event1 := Event{TS: 1, Action: ActionShorten, UserID: "u1", URL: "http://example.com/a"}
 	event2 := Event{TS: 2, Action: ActionFollow, UserID: "u1", URL: "http://example.com/a"}
@@ -28,7 +28,7 @@ func TestFileObserver_Notify(t *testing.T) {
 
 	f, err := os.Open(path)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var lines []string
 	scanner := bufio.NewScanner(f)

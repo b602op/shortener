@@ -104,7 +104,7 @@ func (o *HTTPObserver) doRequest(ctx context.Context, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("ошибка отправки события: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 300 {
 		return &httpStatusError{Code: resp.StatusCode}

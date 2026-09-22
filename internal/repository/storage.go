@@ -89,7 +89,7 @@ func (s *FileStorage) Init(path string) error {
 		}
 		return fmt.Errorf("ошибка открытия файла: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Проверяем первый непробельный байт: '[' — старый формат (JSON-массив).
 	reader := bufio.NewReader(f)
@@ -234,7 +234,7 @@ func (s *FileStorage) saveFile() error {
 	if err != nil {
 		return fmt.Errorf("ошибка создания файла: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	encoder := json.NewEncoder(f)
 	for _, record := range s.data {

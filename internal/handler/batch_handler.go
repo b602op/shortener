@@ -39,7 +39,7 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 		}
 
 		res.Header().Set("Content-Type", "application/json")
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -48,7 +48,7 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 		}
 
 		var batchReq []BatchShortenRequest
-		if err := json.Unmarshal(body, &batchReq); err != nil {
+		if err = json.Unmarshal(body, &batchReq); err != nil {
 			respondWithError(res, "Неверный формат JSON", http.StatusBadRequest)
 			return
 		}
@@ -100,6 +100,6 @@ func MethodPostBatchAPI(cfg *config.Config, store repository.Store) http.Handler
 
 		slog.Info("Батч URLs создан", "count", len(responses))
 		res.WriteHeader(http.StatusCreated)
-		res.Write(respBody)
+		_, _ = res.Write(respBody)
 	}
 }

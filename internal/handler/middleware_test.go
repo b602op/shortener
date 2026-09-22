@@ -18,7 +18,7 @@ func TestGzipMiddleware_AcceptGzip(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"test"}`))
+		_, _ = w.Write([]byte(`{"message":"test"}`))
 	})
 
 	gzipHandler := GzipMiddleware(handler)
@@ -34,7 +34,7 @@ func TestGzipMiddleware_AcceptGzip(t *testing.T) {
 
 	reader, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	body, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -46,7 +46,7 @@ func TestGzipMiddleware_NoAcceptGzip(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"message":"test"}`))
+		_, _ = w.Write([]byte(`{"message":"test"}`))
 	})
 
 	gzipHandler := GzipMiddleware(handler)
@@ -67,15 +67,15 @@ func TestGzipMiddleware_CompressedRequest(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		_, _ = w.Write(body)
 	})
 
 	gzipHandler := GzipMiddleware(handler)
 
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	gz.Write([]byte(`{"url":"https://example.com"}`))
-	gz.Close()
+	_, _ = gz.Write([]byte(`{"url":"https://example.com"}`))
+	_ = gz.Close()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", &buf)
 	req.Header.Set("Content-Encoding", "gzip")
@@ -88,7 +88,7 @@ func TestGzipMiddleware_CompressedRequest(t *testing.T) {
 
 	reader, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
 	require.NoError(t, err)
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	respBody, err := io.ReadAll(reader)
 	require.NoError(t, err)
@@ -100,7 +100,7 @@ func TestGzipMiddleware_PlainTextHTML(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("<html><body>test</body></html>"))
+		_, _ = w.Write([]byte("<html><body>test</body></html>"))
 	})
 
 	gzipHandler := GzipMiddleware(handler)
@@ -119,7 +119,7 @@ func TestGzipMiddleware_PlainTextNotCompressed(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("plain text content"))
+		_, _ = w.Write([]byte("plain text content"))
 	})
 
 	gzipHandler := GzipMiddleware(handler)

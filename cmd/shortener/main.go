@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -47,7 +48,7 @@ func getSecretKey() (string, error) {
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatalf("Ошибка: %v", err)
+		log.Printf("Ошибка: %v", err)
 	}
 }
 
@@ -61,8 +62,8 @@ func run() error {
 	var closers []io.Closer
 	defer func() {
 		for i := len(closers) - 1; i >= 0; i-- {
-			if err := closers[i].Close(); err != nil {
-				log.Printf("Ошибка закрытия ресурса: %v", err)
+			if cerr := closers[i].Close(); cerr != nil {
+				log.Printf("Ошибка закрытия ресурса: %v", cerr)
 			}
 		}
 	}()
@@ -90,9 +91,9 @@ func run() error {
 	closers = append(closers, auditService)
 
 	if cfg.AuditFile != "" {
-		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
-		if err != nil {
-			return err
+		fileObs, obsErr := audit.NewFileObserver(cfg.AuditFile)
+		if obsErr != nil {
+			return obsErr
 		}
 		closers = append(closers, fileObs)
 		auditService.Subscribe(fileObs)
@@ -144,15 +145,15 @@ func run() error {
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Printf("HTTP-сервер слушает %s", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			serverErr <- err
+		if srvErr := server.ListenAndServe(); srvErr != nil && !errors.Is(srvErr, http.ErrServerClosed) {
+			serverErr <- srvErr
 		}
 	}()
 
 	// === Ожидание сигнала или ошибки сервера ===
 	select {
-	case err := <-serverErr:
-		return err
+	case srvErr := <-serverErr:
+		return srvErr
 	case <-ctx.Done():
 		log.Println("Завершение работы сервера...")
 	}
@@ -161,7 +162,8 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
+	err = server.Shutdown(shutdownCtx)
+	if err != nil {
 		log.Printf("Ошибка завершения сервера: %v", err)
 	}
 
