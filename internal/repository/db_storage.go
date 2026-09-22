@@ -1,10 +1,12 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -20,12 +22,10 @@ const pgUniqueViolationCode = "23505"
 
 // DBStorage хранит записи в PostgreSQL и применяет SQL-миграции при инициализации.
 type DBStorage struct {
-	db         *sql.DB
-	migrations string
+	db *sql.DB
 }
 
 // NewDBStorage создаёт хранилище PostgreSQL по DSN и проверяет соединение.
-// Возвращает ошибку, если драйвер недоступен или база не отвечает.
 func NewDBStorage(dsn string) (*DBStorage, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -37,10 +37,7 @@ func NewDBStorage(dsn string) (*DBStorage, error) {
 		return nil, fmt.Errorf("ошибка проверки подключения к БД: %w", err)
 	}
 
-	return &DBStorage{
-		db:         db,
-		migrations: "migrations",
-	}, nil
+	return &DBStorage{db: db}, nil
 }
 
 // Init применяет миграции из директории migrations и подготавливает схему.
@@ -57,13 +54,24 @@ var embedMigrations embed.FS
 
 // runMigrations применяет миграции goose из встроенных SQL-файлов.
 func (s *DBStorage) runMigrations() error {
-	goose.SetBaseFS(embedMigrations)
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("goose: %w", err)
+	subFS, err := fs.Sub(embedMigrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("goose: не удалось получить поддиректорию: %w", err)
 	}
-	if err := goose.Up(s.db, "migrations"); err != nil {
+
+	provider, err := goose.NewProvider(
+		goose.DialectPostgres,
+		s.db,
+		subFS,
+	)
+	if err != nil {
+		return fmt.Errorf("goose: не удалось создать провайдер: %w", err)
+	}
+
+	if _, err := provider.Up(context.Background()); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
+
 	return nil
 }
 

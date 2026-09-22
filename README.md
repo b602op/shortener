@@ -42,3 +42,35 @@ git fetch template && git checkout template/v2 .github
 - **Clean Architecture**
 - **Hexagonal Architecture**
 - **Layered Architecture**
+
+## Сборка с информацией о версии
+
+Информация о версии, дате и коммите подставляется через `-ldflags`:
+
+```bash
+make build
+```
+
+Или вручную:
+
+```bash
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "N/A")
+DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "N/A")
+
+go build -ldflags "\
+  -X main.buildVersion=$VERSION \
+  -X main.buildDate=$DATE \
+  -X main.buildCommit=$COMMIT" \
+  -o bin/shortener ./cmd/shortener
+```
+
+При старте приложение выводит:
+
+```text
+Build version: 1.0.0
+Build date: 2025-01-15T10:30:00Z
+Build commit: abc1234
+```
+
+Если переменные не заданы — выводится `N/A`.

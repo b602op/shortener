@@ -23,6 +23,36 @@ import (
 	"github.com/b602op/shortener/internal/worker"
 )
 
+// Информация о сборке. Заполняется через -ldflags при сборке:
+//
+//	go build -ldflags "-X main.buildVersion=1.0.0 -X main.buildDate=... -X main.buildCommit=..."
+//
+// Если переменные не заданы, при старте выводится "N/A".
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
+// formatBuildInfo формирует строку с информацией о сборке.
+// Для пустых значений подставляет "N/A".
+func formatBuildInfo(version, date, commit string) string {
+	return fmt.Sprintf(
+		"Build version: %s\nBuild date: %s\nBuild commit: %s",
+		orNA(version),
+		orNA(date),
+		orNA(commit),
+	)
+}
+
+// orNA возвращает value или "N/A", если value пустое.
+func orNA(value string) string {
+	if value == "" {
+		return "N/A"
+	}
+	return value
+}
+
 // getSecretKey возвращает секретный ключ для JWT.
 //
 // Приоритет:
@@ -50,11 +80,13 @@ func getSecretKey() (string, error) {
 
 func main() {
 	if err := run(); err != nil {
-		log.Printf("Ошибка: %v", err)
+		log.Fatalf("Ошибка: %v", err)
 	}
 }
 
 func run() error {
+	fmt.Println(formatBuildInfo(buildVersion, buildDate, buildCommit))
+
 	cfg, err := config.New()
 	if err != nil {
 		return err
