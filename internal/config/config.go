@@ -40,13 +40,14 @@ type Config struct {
 	DeleteEnqueueTimeout time.Duration `env:"DELETE_ENQUEUE_TIMEOUT" envDefault:"100ms"`
 }
 
-// New читает флаги и переменные окружения, валидирует результат и поднимает
-// хранилище по приоритету: PostgreSQL → файл → память.
-// Возвращает ошибку только при некорректных параметрах; сбой подключения
-// к хранилищу не фатален — используется хранилище в памяти.
+// New читает флаги, переменные окружения и JSON-файл конфигурации,
+// валидирует результат и поднимает хранилище по приоритету: PostgreSQL → файл → память.
+// Приоритет источников: флаги > env > JSON-файл > дефолты.
+// Возвращает ошибку при некорректных параметрах или проблемах с файлом конфигурации;
+// сбой подключения к хранилищу не фатален — используется хранилище в памяти.
 func New() (*Config, error) {
-	serverAddress := flag.String("a", "localhost:8080", "адрес запуска HTTP-сервера")
-	baseURL := flag.String("b", "http://localhost:8080", "базовый адрес результирующего сокращённого URL")
+	serverAddress := flag.String("a", "", "адрес запуска HTTP-сервера")
+	baseURL := flag.String("b", "", "базовый адрес результирующего сокращённого URL")
 	fileStoragePath := flag.String("f", "", "путь до файла для хранения данных")
 	databaseDSN := flag.String("d", "", "DSN для подключения к PostgreSQL")
 	auditFile := flag.String("audit-file", "", "путь к файлу аудита")
@@ -54,33 +55,43 @@ func New() (*Config, error) {
 	enableHTTPS := flag.Bool("s", false, "включить HTTPS")
 	tlsCert := flag.String("tls-cert", "", "путь к TLS-сертификату")
 	tlsKey := flag.String("tls-key", "", "путь к TLS-ключу")
+	configPath := flag.String("c", "", "путь к JSON-файлу конфигурации")
+	configPathLong := flag.String("config", "", "путь к JSON-файлу конфигурации (длинная форма)")
 
 	flag.Parse()
 
-	serverAddressValue := getEnvOrFlag("SERVER_ADDRESS", *serverAddress)
-	baseURLValue := getEnvOrFlag("BASE_URL", *baseURL)
-	databaseDSNValue := getEnvOrFlag("DATABASE_DSN", *databaseDSN)
-	fileStoragePathValue := getFileStoragePath(*fileStoragePath)
-	auditFileValue := getEnvOrFlag("AUDIT_FILE", *auditFile)
-	auditURLValue := getEnvOrFlag("AUDIT_URL", *auditURL)
+	// Определяем путь к конфигу: короткий флаг -c, длинный --config или env CONFIG.
+	cfgPath := *configPath
+	if cfgPath == "" {
+		cfgPath = *configPathLong
+	}
+	if cfgPath == "" {
+		cfgPath = os.Getenv("CONFIG")
+	}
 
-	// HTTPS: флаг -s перекрывает ENABLE_HTTPS.
-	enableHTTPSValue := getEnableHTTPS(*enableHTTPS)
-
-	// Пути к сертификатам: флаг → env → дефолт.
-	tlsCertValue := getTLSFilePath(*tlsCert, "TLS_CERT_FILE", defaultTLSCertFile)
-	tlsKeyValue := getTLSFilePath(*tlsKey, "TLS_KEY_FILE", defaultTLSKeyFile)
+	// Читаем файл конфигурации (если путь задан). Ошибки — фатальные.
+	var fileCfg FileConfig
+	if cfgPath != "" {
+		loaded, err := loadFileConfig(cfgPath)
+		if err != nil {
+			return nil, err
+		}
+		fileCfg = *loaded
+	}
 
 	config := &Config{
-		ServerAddress:   serverAddressValue,
-		BaseURL:         baseURLValue,
-		FileStoragePath: fileStoragePathValue,
-		DatabaseDSN:     databaseDSNValue,
-		AuditFile:       auditFileValue,
-		AuditURL:        auditURLValue,
-		EnableHTTPS:     enableHTTPSValue,
-		TLSCertFile:     tlsCertValue,
-		TLSKeyFile:      tlsKeyValue,
+		// Приоритет: флаг > env > JSON-файл > дефолт.
+		ServerAddress:   resolveString(*serverAddress, "SERVER_ADDRESS", fileCfg.ServerAddress, "localhost:8080"),
+		BaseURL:         resolveString(*baseURL, "BASE_URL", fileCfg.BaseURL, "http://localhost:8080"),
+		FileStoragePath: resolveString(*fileStoragePath, "FILE_STORAGE_PATH", fileCfg.FileStoragePath, defaultFileStoragePath),
+		DatabaseDSN:     resolveString(*databaseDSN, "DATABASE_DSN", fileCfg.DatabaseDSN, ""),
+		AuditFile:       resolveString(*auditFile, "AUDIT_FILE", "", ""),
+		AuditURL:        resolveString(*auditURL, "AUDIT_URL", "", ""),
+		EnableHTTPS:     resolveBool(*enableHTTPS, "ENABLE_HTTPS", fileCfg.EnableHTTPS, false),
+
+		// Пути к сертификатам: флаг → env → дефолт.
+		TLSCertFile: getTLSFilePath(*tlsCert, "TLS_CERT_FILE", defaultTLSCertFile),
+		TLSKeyFile:  getTLSFilePath(*tlsKey, "TLS_KEY_FILE", defaultTLSKeyFile),
 
 		// Параметры воркера удаления. Значения по умолчанию,
 		// переопределяются через env DELETE_*.
@@ -137,11 +148,33 @@ func (c *Config) createStore() (repository.Store, error) {
 	return nil, fmt.Errorf("нет параметров для хранилища")
 }
 
-func getEnvOrFlag(envVar, flagValue string) string {
-	if envValue := os.Getenv(envVar); envValue != "" {
+// resolveString возвращает значение с приоритетом: флаг > env > файл > дефолт.
+func resolveString(flagValue, envKey, fileValue, defaultValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if envValue := os.Getenv(envKey); envValue != "" {
 		return envValue
 	}
-	return flagValue
+	if fileValue != "" {
+		return fileValue
+	}
+	return defaultValue
+}
+
+// resolveBool возвращает bool с приоритетом: флаг > env > файл > дефолт.
+// fileValue — указатель, чтобы отличить false от отсутствия поля в файле.
+func resolveBool(flagValue bool, envKey string, fileValue *bool, defaultValue bool) bool {
+	if flagValue {
+		return true
+	}
+	if envValue := os.Getenv(envKey); envValue != "" {
+		return parseBoolEnv(envKey)
+	}
+	if fileValue != nil {
+		return *fileValue
+	}
+	return defaultValue
 }
 
 // parseBoolEnv читает переменную окружения как bool.
@@ -156,15 +189,6 @@ func parseBoolEnv(envVar string) bool {
 	}
 }
 
-// getEnableHTTPS разрешает включение HTTPS по приоритету:
-// флаг -s перекрывает переменную окружения ENABLE_HTTPS.
-func getEnableHTTPS(flagValue bool) bool {
-	if flagValue {
-		return true
-	}
-	return parseBoolEnv("ENABLE_HTTPS")
-}
-
 // getTLSFilePath разрешает путь к TLS-файлу по приоритету:
 // флаг → переменная окружения → значение по умолчанию.
 func getTLSFilePath(flagValue, envVar, defaultValue string) string {
@@ -175,16 +199,6 @@ func getTLSFilePath(flagValue, envVar, defaultValue string) string {
 		return envValue
 	}
 	return defaultValue
-}
-
-func getFileStoragePath(flagValue string) string {
-	if envValue := os.Getenv("FILE_STORAGE_PATH"); envValue != "" {
-		return envValue
-	}
-	if flagValue != "" {
-		return flagValue
-	}
-	return defaultFileStoragePath
 }
 
 // getEnvInt читает env-переменную как int. При ошибке парсинга возвращает defaultValue.

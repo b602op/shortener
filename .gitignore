@@ -46,3 +46,6 @@ test_storage_insert.json
 # TLS-сертификаты
 certs/*.pem
 *.pem
+
+# Реальный конфиг (не коммитить, коммитится только config.example.json)
+config.json
