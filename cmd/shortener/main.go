@@ -130,7 +130,13 @@ func run() error {
 	server := &http.Server{Addr: addr, Handler: httpHandler}
 
 	// === Контекст с сигналом ===
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// SIGQUIT обрабатывается так же, как SIGINT/SIGTERM — graceful shutdown
+	// важнее дампа стека.
+	ctx, stop := signal.NotifyContext(context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+	)
 	defer stop()
 
 	// === Запуск сервера ===
@@ -142,25 +148,27 @@ func run() error {
 	case srvErr := <-serverErr:
 		return srvErr
 	case <-ctx.Done():
-		log.Println("Завершение работы сервера...")
+		log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
 	}
 
 	// === Graceful shutdown ===
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Shutdown ждёт завершения активных запросов (до 5s).
 	err = server.Shutdown(shutdownCtx)
 	if err != nil {
 		log.Printf("Ошибка завершения сервера: %v", err)
 	}
 
-	log.Println("Сервер завершил работу")
+	log.Println("HTTP-сервер остановлен")
 	return nil
 }
 
-// closeAll закрывает ресурсы в обратном порядке, логируя ошибки.
+// closeAll закрывает ресурсы в обратном порядке (LIFO), логируя каждый шаг.
 func closeAll(closers []io.Closer) {
 	for i := len(closers) - 1; i >= 0; i-- {
+		log.Printf("Закрытие ресурса: %T", closers[i])
 		if err := closers[i].Close(); err != nil {
 			log.Printf("Ошибка закрытия ресурса: %v", err)
 		}
