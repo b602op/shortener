@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,75 +41,177 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-func TestResolveString(t *testing.T) {
-	tests := []struct {
-		name         string
-		flagValue    string
-		envKey       string
-		envValue     string
-		fileValue    string
-		defaultValue string
-		want         string
-	}{
-		{"флаг перекрывает env и файл", "flag", "TEST_RESOLVE_ENV", "env", "file", "default", "flag"},
-		{"env перекрывает файл", "", "TEST_RESOLVE_ENV", "env", "file", "default", "env"},
-		{"файл перекрывает дефолт", "", "TEST_RESOLVE_ENV", "", "file", "default", "file"},
-		{"дефолт при пустых флаге, env и файле", "", "TEST_RESOLVE_ENV", "", "", "default", "default"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				t.Setenv(tt.envKey, tt.envValue)
-			} else {
-				t.Setenv(tt.envKey, "")
-			}
-
-			got := resolveString(tt.flagValue, tt.envKey, tt.fileValue, tt.defaultValue)
-			assert.Equal(t, tt.want, got)
+func TestApplyFlagConfig_OnlyExplicitlySet(t *testing.T) {
+	t.Run("все строковые флаги заданы явно", func(t *testing.T) {
+		cfg := &Config{}
+		applyFlagConfig(cfg, map[string]bool{
+			"a": true, "b": true, "f": true, "d": true,
+			"audit-file": true, "audit-url": true,
+			"tls-cert": true, "tls-key": true,
+		}, flagValues{
+			serverAddress:   ":9090",
+			baseURL:         "http://localhost:9090",
+			fileStoragePath: "/tmp/storage.json",
+			databaseDSN:     "postgres://localhost/db",
+			auditFile:       "/tmp/audit.log",
+			auditURL:        "http://audit.local",
+			tlsCert:         "/tmp/cert.pem",
+			tlsKey:          "/tmp/key.pem",
 		})
-	}
+
+		assert.Equal(t, ":9090", cfg.ServerAddress)
+		assert.Equal(t, "http://localhost:9090", cfg.BaseURL)
+		assert.Equal(t, "/tmp/storage.json", cfg.FileStoragePath)
+		assert.Equal(t, "postgres://localhost/db", cfg.DatabaseDSN)
+		assert.Equal(t, "/tmp/audit.log", cfg.AuditFile)
+		assert.Equal(t, "http://audit.local", cfg.AuditURL)
+		assert.Equal(t, "/tmp/cert.pem", cfg.TLSCertFile)
+		assert.Equal(t, "/tmp/key.pem", cfg.TLSKeyFile)
+	})
+
+	t.Run("флаги не заданы — конфиг не меняется", func(t *testing.T) {
+		cfg := &Config{ServerAddress: "env-value:8080", EnableHTTPS: true}
+		applyFlagConfig(cfg, map[string]bool{}, flagValues{})
+		assert.Equal(t, "env-value:8080", cfg.ServerAddress)
+		assert.True(t, cfg.EnableHTTPS)
+	})
 }
 
-func TestResolveBool(t *testing.T) {
-	fileTrue := true
-	fileFalse := false
+func TestParseFlags_ExplicitlySetVsNotSet(t *testing.T) {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-s=false", "-a", "localhost:9090"})
 
-	t.Run("флаг перекрывает env и файл", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "false")
-		got := resolveBool(true, "TEST_RESOLVE_BOOL", &fileFalse, false)
-		assert.True(t, got)
+	// -s задан явно, хоть и в false — Visit это фиксирует
+	assert.Contains(t, wasSet, "s")
+	assert.False(t, values.enableHTTPS)
+	// -a задан явно
+	assert.Contains(t, wasSet, "a")
+	assert.Equal(t, "localhost:9090", values.serverAddress)
+	// -b не задан
+	assert.NotContains(t, wasSet, "b")
+	assert.Empty(t, values.baseURL)
+}
+
+func TestFlagsOverrideEnv_EnableHTTPSFalse(t *testing.T) {
+	// Симулируем: env=true, флаг -s=false задан явно.
+	t.Setenv("ENABLE_HTTPS", "true")
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-s=false"})
+
+	cfg := &Config{EnableHTTPS: false} // дефолт
+	applyEnvConfig(cfg)                // env перекрывает дефолт → true
+	assert.True(t, cfg.EnableHTTPS)
+
+	applyFlagConfig(cfg, wasSet, values) // флаг перекрывает всё → false
+	assert.False(t, cfg.EnableHTTPS)
+}
+
+func TestFlagsNotSet_EnvWins(t *testing.T) {
+	// Флаг -s не задан — env ENABLE_HTTPS=true действует.
+	t.Setenv("ENABLE_HTTPS", "true")
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{})
+
+	cfg := &Config{EnableHTTPS: false}
+	applyEnvConfig(cfg)
+	applyFlagConfig(cfg, wasSet, values)
+	assert.True(t, cfg.EnableHTTPS)
+}
+
+func TestApplyFileConfig_OverridesDefaults(t *testing.T) {
+	enableHTTPS := true
+	workerCount := 3
+	queueSize := 512
+	bufferSize := 50
+	flushInterval := 2 * time.Second
+	enqueueTimeout := 200 * time.Millisecond
+
+	cfg := &Config{
+		ServerAddress:        "localhost:8080",
+		BaseURL:              "http://localhost:8080",
+		FileStoragePath:      "data/storage.json",
+		TLSCertFile:          defaultTLSCertFile,
+		TLSKeyFile:           defaultTLSKeyFile,
+		DeleteWorkerCount:    5,
+		DeleteQueueSize:      1024,
+		DeleteBufferSize:     100,
+		DeleteFlushInterval:  time.Second,
+		DeleteEnqueueTimeout: 100 * time.Millisecond,
+	}
+
+	applyFileConfig(cfg, &FileConfig{
+		ServerAddress:        "localhost:9090",
+		BaseURL:              "http://localhost:9090",
+		FileStoragePath:      "/tmp/storage.json",
+		DatabaseDSN:          "postgres://localhost/db",
+		EnableHTTPS:          &enableHTTPS,
+		TLSCertFile:          "/tmp/cert.pem",
+		TLSKeyFile:           "/tmp/key.pem",
+		AuditFile:            "/tmp/audit.log",
+		AuditURL:             "http://audit.local",
+		DeleteWorkerCount:    &workerCount,
+		DeleteQueueSize:      &queueSize,
+		DeleteBufferSize:     &bufferSize,
+		DeleteFlushInterval:  &flushInterval,
+		DeleteEnqueueTimeout: &enqueueTimeout,
 	})
 
-	t.Run("env перекрывает файл", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "true")
-		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileFalse, false)
-		assert.True(t, got)
-	})
+	assert.Equal(t, "localhost:9090", cfg.ServerAddress)
+	assert.Equal(t, "http://localhost:9090", cfg.BaseURL)
+	assert.Equal(t, "/tmp/storage.json", cfg.FileStoragePath)
+	assert.Equal(t, "postgres://localhost/db", cfg.DatabaseDSN)
+	assert.True(t, cfg.EnableHTTPS)
+	assert.Equal(t, "/tmp/cert.pem", cfg.TLSCertFile)
+	assert.Equal(t, "/tmp/key.pem", cfg.TLSKeyFile)
+	assert.Equal(t, "/tmp/audit.log", cfg.AuditFile)
+	assert.Equal(t, "http://audit.local", cfg.AuditURL)
+	assert.Equal(t, 3, cfg.DeleteWorkerCount)
+	assert.Equal(t, 512, cfg.DeleteQueueSize)
+	assert.Equal(t, 50, cfg.DeleteBufferSize)
+	assert.Equal(t, 2*time.Second, cfg.DeleteFlushInterval)
+	assert.Equal(t, 200*time.Millisecond, cfg.DeleteEnqueueTimeout)
+}
 
-	t.Run("env false перекрывает файл true", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "false")
-		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileTrue, false)
-		assert.False(t, got)
-	})
+func TestApplyFileConfig_EmptyFileKeepsDefaults(t *testing.T) {
+	cfg := &Config{
+		ServerAddress:       "localhost:8080",
+		TLSCertFile:         defaultTLSCertFile,
+		TLSKeyFile:          defaultTLSKeyFile,
+		DeleteWorkerCount:   5,
+		DeleteFlushInterval: time.Second,
+	}
 
-	t.Run("файл true при пустом env", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "")
-		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileTrue, false)
-		assert.True(t, got)
-	})
+	// Пустой файл не перекрывает ничего
+	applyFileConfig(cfg, &FileConfig{})
 
-	t.Run("файл false при пустом env", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "")
-		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileFalse, true)
-		assert.False(t, got)
-	})
+	assert.Equal(t, "localhost:8080", cfg.ServerAddress)
+	assert.Equal(t, defaultTLSCertFile, cfg.TLSCertFile)
+	assert.Equal(t, defaultTLSKeyFile, cfg.TLSKeyFile)
+	assert.Equal(t, 5, cfg.DeleteWorkerCount)
+	assert.Equal(t, time.Second, cfg.DeleteFlushInterval)
+}
 
-	t.Run("дефолт при пустом env и отсутствии поля в файле", func(t *testing.T) {
-		t.Setenv("TEST_RESOLVE_BOOL", "")
-		got := resolveBool(false, "TEST_RESOLVE_BOOL", nil, true)
-		assert.True(t, got)
-	})
+func TestApplyEnvConfig_OverridesFile(t *testing.T) {
+	t.Setenv("SERVER_ADDRESS", "env:9090")
+	t.Setenv("ENABLE_HTTPS", "true")
+	t.Setenv("DELETE_WORKER_COUNT", "7")
+	t.Setenv("DELETE_FLUSH_INTERVAL", "3s")
+
+	cfg := &Config{
+		ServerAddress:       "file:8080",
+		EnableHTTPS:         false,
+		DeleteWorkerCount:   3,
+		DeleteFlushInterval: time.Second,
+	}
+
+	applyEnvConfig(cfg)
+
+	assert.Equal(t, "env:9090", cfg.ServerAddress)
+	assert.True(t, cfg.EnableHTTPS)
+	assert.Equal(t, 7, cfg.DeleteWorkerCount)
+	assert.Equal(t, 3*time.Second, cfg.DeleteFlushInterval)
 }
 
 func TestLoadFileConfig_NotFound(t *testing.T) {
@@ -184,7 +287,16 @@ func TestLoadFileConfig_AllFields(t *testing.T) {
         "base_url": "http://localhost:9090",
         "file_storage_path": "/tmp/storage.json",
         "database_dsn": "postgres://localhost/db",
-        "enable_https": true
+        "enable_https": true,
+        "tls_cert_file": "/tmp/cert.pem",
+        "tls_key_file": "/tmp/key.pem",
+        "audit_file": "/tmp/audit.log",
+        "audit_url": "http://audit.local",
+        "delete_worker_count": 3,
+        "delete_queue_size": 512,
+        "delete_buffer_size": 50,
+        "delete_flush_interval": 2000000000,
+        "delete_enqueue_timeout": 200000000
     }`), 0644))
 
 	cfg, err := loadFileConfig(path)
@@ -193,8 +305,38 @@ func TestLoadFileConfig_AllFields(t *testing.T) {
 	assert.Equal(t, "http://localhost:9090", cfg.BaseURL)
 	assert.Equal(t, "/tmp/storage.json", cfg.FileStoragePath)
 	assert.Equal(t, "postgres://localhost/db", cfg.DatabaseDSN)
-	assert.NotNil(t, cfg.EnableHTTPS)
+	require.NotNil(t, cfg.EnableHTTPS)
 	assert.True(t, *cfg.EnableHTTPS)
+	assert.Equal(t, "/tmp/cert.pem", cfg.TLSCertFile)
+	assert.Equal(t, "/tmp/key.pem", cfg.TLSKeyFile)
+	assert.Equal(t, "/tmp/audit.log", cfg.AuditFile)
+	assert.Equal(t, "http://audit.local", cfg.AuditURL)
+
+	require.NotNil(t, cfg.DeleteWorkerCount)
+	assert.Equal(t, 3, *cfg.DeleteWorkerCount)
+	require.NotNil(t, cfg.DeleteQueueSize)
+	assert.Equal(t, 512, *cfg.DeleteQueueSize)
+	require.NotNil(t, cfg.DeleteBufferSize)
+	assert.Equal(t, 50, *cfg.DeleteBufferSize)
+	require.NotNil(t, cfg.DeleteFlushInterval)
+	assert.Equal(t, 2*time.Second, *cfg.DeleteFlushInterval)
+	require.NotNil(t, cfg.DeleteEnqueueTimeout)
+	assert.Equal(t, 200*time.Millisecond, *cfg.DeleteEnqueueTimeout)
+}
+
+func TestLoadFileConfig_DeleteFieldsAbsent(t *testing.T) {
+	// Поля воркера удаления не заданы — указатели остаются nil
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"server_address": ":8080"}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.DeleteWorkerCount)
+	assert.Nil(t, cfg.DeleteQueueSize)
+	assert.Nil(t, cfg.DeleteBufferSize)
+	assert.Nil(t, cfg.DeleteFlushInterval)
+	assert.Nil(t, cfg.DeleteEnqueueTimeout)
 }
 
 func TestGetEnvInt(t *testing.T) {
@@ -316,40 +458,36 @@ func TestParseBoolEnv(t *testing.T) {
 	}
 }
 
-func TestGetTLSFilePath(t *testing.T) {
-	tests := []struct {
-		name         string
-		flagValue    string
-		envValue     string
-		defaultValue string
-		want         string
-	}{
-		{"флаг перекрывает env", "/tmp/flag.pem", "/tmp/env.pem", "/tmp/default.pem", "/tmp/flag.pem"},
-		{"env при пустом флаге", "", "/tmp/env.pem", "/tmp/default.pem", "/tmp/env.pem"},
-		{"дефолт при пустых флаге и env", "", "", "/tmp/default.pem", "/tmp/default.pem"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				t.Setenv("TEST_TLS_FILE", tt.envValue)
-			} else {
-				t.Setenv("TEST_TLS_FILE", "")
-			}
-
-			got := getTLSFilePath(tt.flagValue, "TEST_TLS_FILE", tt.defaultValue)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestTLSDefaultPaths(t *testing.T) {
 	// Дефолтные пути к сертификатам при незаданных флагах и env
 	t.Setenv("TLS_CERT_FILE", "")
 	t.Setenv("TLS_KEY_FILE", "")
 
-	assert.Equal(t, defaultTLSCertFile, getTLSFilePath("", "TLS_CERT_FILE", defaultTLSCertFile))
-	assert.Equal(t, defaultTLSKeyFile, getTLSFilePath("", "TLS_KEY_FILE", defaultTLSKeyFile))
+	cfg := &Config{
+		TLSCertFile: defaultTLSCertFile,
+		TLSKeyFile:  defaultTLSKeyFile,
+	}
+
+	applyEnvConfig(cfg)
+
+	assert.Equal(t, defaultTLSCertFile, cfg.TLSCertFile)
+	assert.Equal(t, defaultTLSKeyFile, cfg.TLSKeyFile)
+}
+
+func TestTLSEnvOverridesDefault(t *testing.T) {
+	// Env перекрывает дефолтные пути к сертификатам
+	t.Setenv("TLS_CERT_FILE", "/env/cert.pem")
+	t.Setenv("TLS_KEY_FILE", "/env/key.pem")
+
+	cfg := &Config{
+		TLSCertFile: defaultTLSCertFile,
+		TLSKeyFile:  defaultTLSKeyFile,
+	}
+
+	applyEnvConfig(cfg)
+
+	assert.Equal(t, "/env/cert.pem", cfg.TLSCertFile)
+	assert.Equal(t, "/env/key.pem", cfg.TLSKeyFile)
 }
 
 func TestHTTPSGetters(t *testing.T) {

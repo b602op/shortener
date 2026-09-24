@@ -5,6 +5,7 @@ package repository
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,7 +87,7 @@ func (s *FileStorage) Init(path string) error {
 
 	f, err := os.Open(s.filePath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return fmt.Errorf("ошибка открытия файла: %w", err)
@@ -97,7 +98,7 @@ func (s *FileStorage) Init(path string) error {
 	reader := bufio.NewReader(f)
 	firstByte, err := peekFirstNonSpace(reader)
 	if err != nil {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil // пустой файл
 		}
 		return fmt.Errorf("ошибка чтения файла: %w", err)

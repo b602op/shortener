@@ -95,12 +95,43 @@ CONFIG=config.json ./shortener
     "base_url": "http://localhost",
     "file_storage_path": "/path/to/file.db",
     "database_dsn": "",
-    "enable_https": true
+    "enable_https": true,
+    "tls_cert_file": "./certs/cert.pem",
+    "tls_key_file": "./certs/key.pem",
+    "audit_file": "/path/to/audit.log",
+    "audit_url": "http://audit.example.com/events",
+    "delete_worker_count": 5,
+    "delete_queue_size": 1024,
+    "delete_buffer_size": 100,
+    "delete_flush_interval": 1000000000,
+    "delete_enqueue_timeout": 100000000
 }
 ```
 
 Все поля опциональны, незаданные берутся из env, флагов или дефолтов.
 Неизвестные поля игнорируются.
+
+### Поля JSON-файла
+
+| JSON-поле | Env | Флаг | По умолчанию |
+|-----------|-----|------|--------------|
+| `server_address` | `SERVER_ADDRESS` | `-a` | `localhost:8080` |
+| `base_url` | `BASE_URL` | `-b` | `http://localhost:8080` |
+| `file_storage_path` | `FILE_STORAGE_PATH` | `-f` | `data/storage.json` |
+| `database_dsn` | `DATABASE_DSN` | `-d` | `""` |
+| `enable_https` | `ENABLE_HTTPS` | `-s` | `false` |
+| `tls_cert_file` | `TLS_CERT_FILE` | `-tls-cert` | `./certs/cert.pem` |
+| `tls_key_file` | `TLS_KEY_FILE` | `-tls-key` | `./certs/key.pem` |
+| `audit_file` | `AUDIT_FILE` | `-audit-file` | `""` |
+| `audit_url` | `AUDIT_URL` | `-audit-url` | `""` |
+| `delete_worker_count` | `DELETE_WORKER_COUNT` | — | `5` |
+| `delete_queue_size` | `DELETE_QUEUE_SIZE` | — | `1024` |
+| `delete_buffer_size` | `DELETE_BUFFER_SIZE` | — | `100` |
+| `delete_flush_interval` | `DELETE_FLUSH_INTERVAL` | — | `1s` |
+| `delete_enqueue_timeout` | `DELETE_ENQUEUE_TIMEOUT` | — | `100ms` |
+
+> **Наносекунды:** поля `delete_flush_interval` и `delete_enqueue_timeout` — числа
+> в наносекундах (`1000000000` = 1 секунда, `100000000` = 100 миллисекунд).
 
 ### Приоритет источников
 
@@ -111,6 +142,10 @@ CONFIG=config.json ./shortener
 
 Пример: `-a localhost:9090` перекроет `server_address` из файла,
 а `SERVER_ADDRESS=...` перекроет его при незаданном флаге.
+
+Флаги имеют абсолютный приоритет, включая явное выключение:
+`-s=false` выключает HTTPS, даже если задан `ENABLE_HTTPS=true`
+или `"enable_https": true` в JSON-файле.
 
 ### Ошибки
 
@@ -169,6 +204,7 @@ ENABLE_HTTPS=true ./shortener
 | Путь к ключу | `-tls-key` | `TLS_KEY_FILE` | `./certs/key.pem` |
 
 Значения `ENABLE_HTTPS`: `true`, `1`, `yes` (регистр не важен) — включают HTTPS,
-любое другое значение — выключает. Флаг `-s` перекрывает переменную окружения.
+любое другое значение — выключает. Флаг `-s` перекрывает переменную окружения
+и JSON-файл, включая явное выключение `-s=false` при `ENABLE_HTTPS=true`.
 
 Сертификаты не коммитятся в git (добавлены в `.gitignore`).

@@ -94,9 +94,13 @@ func run() error {
 	}
 
 	// === Ресурсы, требующие Close ===
+	// Все append в closers живут только в run(), здесь — в одном месте.
+	// Замыкание вместо defer closeAll(closers): слайс передаётся по значению
+	// в момент defer, поэтому позднее добавление ресурсов было бы потеряно.
 	var closers []io.Closer
-	defer closeAll(closers)
+	defer func() { closeAll(closers) }()
 
+	// 1. Хранилище
 	store := cfg.GetStorage()
 	if closer, ok := store.(io.Closer); ok {
 		closers = append(closers, closer)
@@ -108,22 +112,23 @@ func run() error {
 	log.Printf("Сервер запускается на %s", addr)
 	log.Printf("Базовый URL: %s", baseURL)
 
-	// === Секретный ключ ===
+	// 2. Секретный ключ
 	secretKey, err := getSecretKey()
 	if err != nil {
 		return err
 	}
 	authService := auth.NewService(secretKey)
 
-	// === Аудит ===
-	auditService, err := setupAudit(cfg, &closers)
+	// 3. Аудит
+	auditService, auditClosers, err := setupAudit(cfg)
 	if err != nil {
 		return err
 	}
+	closers = append(closers, auditClosers...)
 
-	// === Worker ===
-	deleteService := setupWorker(cfg, store)
-	closers = append(closers, deleteService)
+	// 4. Worker
+	deleteService, workerClosers := setupWorker(cfg, store)
+	closers = append(closers, workerClosers...)
 
 	// === HTTP-сервер ===
 	httpHandler := setupHandler(cfg, store, authService, deleteService, auditService)
@@ -166,6 +171,7 @@ func run() error {
 }
 
 // closeAll закрывает ресурсы в обратном порядке (LIFO), логируя каждый шаг.
+// Все ресурсы регистрируются в run() — порядок в closers определяет порядок закрытия.
 func closeAll(closers []io.Closer) {
 	for i := len(closers) - 1; i >= 0; i-- {
 		log.Printf("Закрытие ресурса: %T", closers[i])
@@ -176,16 +182,20 @@ func closeAll(closers []io.Closer) {
 }
 
 // setupAudit создаёт сервис аудита и подписывает observers согласно конфигу.
-func setupAudit(cfg *config.Config, closers *[]io.Closer) (*audit.Service, error) {
+// Возвращает сервис и созданные ресурсы, требующие Close:
+// сначала svc, потом fileObs — при LIFO-закрытии fileObs закроется раньше svc.
+func setupAudit(cfg *config.Config) (*audit.Service, []io.Closer, error) {
+	var closers []io.Closer
+
 	svc := audit.NewService()
-	*closers = append(*closers, svc)
+	closers = append(closers, svc)
 
 	if cfg.AuditFile != "" {
 		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		*closers = append(*closers, fileObs)
+		closers = append(closers, fileObs)
 		svc.Subscribe(fileObs)
 		log.Printf("Аудит в файл: %s", cfg.AuditFile)
 	}
@@ -200,11 +210,12 @@ func setupAudit(cfg *config.Config, closers *[]io.Closer) (*audit.Service, error
 		log.Println("Аудит отключён")
 	}
 
-	return svc, nil
+	return svc, closers, nil
 }
 
 // setupWorker создаёт сервис асинхронного удаления.
-func setupWorker(cfg *config.Config, store repository.Store) *worker.DeleteService {
+// Возвращает сервис и слайс ресурсов, требующих Close, — сам сервис.
+func setupWorker(cfg *config.Config, store repository.Store) (*worker.DeleteService, []io.Closer) {
 	workerCfg := worker.Config{
 		WorkerCount:    cfg.DeleteWorkerCount,
 		QueueSize:      cfg.DeleteQueueSize,
@@ -212,7 +223,8 @@ func setupWorker(cfg *config.Config, store repository.Store) *worker.DeleteServi
 		FlushInterval:  cfg.DeleteFlushInterval,
 		EnqueueTimeout: cfg.DeleteEnqueueTimeout,
 	}
-	return worker.NewDeleteService(store, workerCfg)
+	svc := worker.NewDeleteService(store, workerCfg)
+	return svc, []io.Closer{svc}
 }
 
 // setupHandler создаёт HTTP-обработчик со всеми зависимостями.
@@ -240,18 +252,26 @@ func serveServer(server *http.Server, cfg *config.Config, addr string, serverErr
 		certFile := cfg.GetTLSCertFile()
 		keyFile := cfg.GetTLSKeyFile()
 
-		if _, statErr := os.Stat(certFile); os.IsNotExist(statErr) {
-			serverErr <- fmt.Errorf(
-				"TLS-сертификат не найден по пути '%s'. Запустите 'make certs' для генерации",
-				certFile,
-			)
+		if _, statErr := os.Stat(certFile); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				serverErr <- fmt.Errorf(
+					"TLS-сертификат не найден по пути %q. Запустите 'make certs' для генерации: %w",
+					certFile, statErr,
+				)
+			} else {
+				serverErr <- fmt.Errorf("TLS-сертификат %q недоступен: %w", certFile, statErr)
+			}
 			return
 		}
-		if _, statErr := os.Stat(keyFile); os.IsNotExist(statErr) {
-			serverErr <- fmt.Errorf(
-				"TLS-ключ не найден по пути '%s'. Запустите 'make certs' для генерации",
-				keyFile,
-			)
+		if _, statErr := os.Stat(keyFile); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				serverErr <- fmt.Errorf(
+					"TLS-ключ не найден по пути %q. Запустите 'make certs' для генерации: %w",
+					keyFile, statErr,
+				)
+			} else {
+				serverErr <- fmt.Errorf("TLS-ключ %q недоступен: %w", keyFile, statErr)
+			}
 			return
 		}
 

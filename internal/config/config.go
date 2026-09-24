@@ -43,33 +43,23 @@ type Config struct {
 // New читает флаги, переменные окружения и JSON-файл конфигурации,
 // валидирует результат и поднимает хранилище по приоритету: PostgreSQL → файл → память.
 // Приоритет источников: флаги > env > JSON-файл > дефолты.
+// Флаги имеют абсолютный приоритет: явно заданный -s=false перекрывает ENABLE_HTTPS=true.
 // Возвращает ошибку при некорректных параметрах или проблемах с файлом конфигурации;
 // сбой подключения к хранилищу не фатален — используется хранилище в памяти.
 func New() (*Config, error) {
-	serverAddress := flag.String("a", "", "адрес запуска HTTP-сервера")
-	baseURL := flag.String("b", "", "базовый адрес результирующего сокращённого URL")
-	fileStoragePath := flag.String("f", "", "путь до файла для хранения данных")
-	databaseDSN := flag.String("d", "", "DSN для подключения к PostgreSQL")
-	auditFile := flag.String("audit-file", "", "путь к файлу аудита")
-	auditURL := flag.String("audit-url", "", "URL сервера аудита")
-	enableHTTPS := flag.Bool("s", false, "включить HTTPS")
-	tlsCert := flag.String("tls-cert", "", "путь к TLS-сертификату")
-	tlsKey := flag.String("tls-key", "", "путь к TLS-ключу")
-	configPath := flag.String("c", "", "путь к JSON-файлу конфигурации")
-	configPathLong := flag.String("config", "", "путь к JSON-файлу конфигурации (длинная форма)")
+	// 1. Регистрируем флаги и парсим аргументы командной строки (без применения).
+	values, wasSet := parseFlags(flag.CommandLine, os.Args[1:])
 
-	flag.Parse()
-
-	// Определяем путь к конфигу: короткий флаг -c, длинный --config или env CONFIG.
-	cfgPath := *configPath
+	// 2. Определяем путь к конфигу: короткий флаг -c, длинный --config или env CONFIG.
+	cfgPath := values.configPath
 	if cfgPath == "" {
-		cfgPath = *configPathLong
+		cfgPath = values.configPathLong
 	}
 	if cfgPath == "" {
 		cfgPath = os.Getenv("CONFIG")
 	}
 
-	// Читаем файл конфигурации (если путь задан). Ошибки — фатальные.
+	// 3. Читаем файл конфигурации (если путь задан). Ошибки — фатальные.
 	var fileCfg FileConfig
 	if cfgPath != "" {
 		loaded, err := loadFileConfig(cfgPath)
@@ -79,43 +69,48 @@ func New() (*Config, error) {
 		fileCfg = *loaded
 	}
 
-	config := &Config{
-		// Приоритет: флаг > env > JSON-файл > дефолт.
-		ServerAddress:   resolveString(*serverAddress, "SERVER_ADDRESS", fileCfg.ServerAddress, "localhost:8080"),
-		BaseURL:         resolveString(*baseURL, "BASE_URL", fileCfg.BaseURL, "http://localhost:8080"),
-		FileStoragePath: resolveString(*fileStoragePath, "FILE_STORAGE_PATH", fileCfg.FileStoragePath, defaultFileStoragePath),
-		DatabaseDSN:     resolveString(*databaseDSN, "DATABASE_DSN", fileCfg.DatabaseDSN, ""),
-		AuditFile:       resolveString(*auditFile, "AUDIT_FILE", "", ""),
-		AuditURL:        resolveString(*auditURL, "AUDIT_URL", "", ""),
-		EnableHTTPS:     resolveBool(*enableHTTPS, "ENABLE_HTTPS", fileCfg.EnableHTTPS, false),
-
-		// Пути к сертификатам: флаг → env → дефолт.
-		TLSCertFile: getTLSFilePath(*tlsCert, "TLS_CERT_FILE", defaultTLSCertFile),
-		TLSKeyFile:  getTLSFilePath(*tlsKey, "TLS_KEY_FILE", defaultTLSKeyFile),
-
-		// Параметры воркера удаления. Значения по умолчанию,
-		// переопределяются через env DELETE_*.
-		DeleteWorkerCount:    getEnvInt("DELETE_WORKER_COUNT", 5),
-		DeleteQueueSize:      getEnvInt("DELETE_QUEUE_SIZE", 1024),
-		DeleteBufferSize:     getEnvInt("DELETE_BUFFER_SIZE", 100),
-		DeleteFlushInterval:  getEnvDuration("DELETE_FLUSH_INTERVAL", time.Second),
-		DeleteEnqueueTimeout: getEnvDuration("DELETE_ENQUEUE_TIMEOUT", 100*time.Millisecond),
+	// 4. Собираем конфиг в порядке приоритета: дефолт → файл → env → флаги.
+	cfg := &Config{
+		// 1. Дефолты (самый низкий приоритет).
+		ServerAddress:        "localhost:8080",
+		BaseURL:              "http://localhost:8080",
+		FileStoragePath:      defaultFileStoragePath,
+		DatabaseDSN:          "",
+		AuditFile:            "",
+		AuditURL:             "",
+		EnableHTTPS:          false,
+		TLSCertFile:          defaultTLSCertFile,
+		TLSKeyFile:           defaultTLSKeyFile,
+		DeleteWorkerCount:    5,
+		DeleteQueueSize:      1024,
+		DeleteBufferSize:     100,
+		DeleteFlushInterval:  time.Second,
+		DeleteEnqueueTimeout: 100 * time.Millisecond,
 	}
 
-	if err := config.Validate(); err != nil {
+	// 2. Файл (перекрывает дефолты).
+	applyFileConfig(cfg, &fileCfg)
+
+	// 3. Env (перекрывает файл).
+	applyEnvConfig(cfg)
+
+	// 4. Флаги (перекрывают всё) — применяются только явно заданные.
+	applyFlagConfig(cfg, wasSet, values)
+
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	// Выбираем хранилище: PostgreSQL → файл → память
-	store, err := config.createStore()
+	store, err := cfg.createStore()
 	if err != nil {
 		slog.Warn("Ошибка создания хранилища, используется память", "error", err)
-		config.storage = repository.NewFileStorage()
+		cfg.storage = repository.NewFileStorage()
 	} else {
-		config.storage = store
+		cfg.storage = store
 	}
 
-	return config, nil
+	return cfg, nil
 }
 
 func (c *Config) createStore() (repository.Store, error) {
@@ -148,33 +143,180 @@ func (c *Config) createStore() (repository.Store, error) {
 	return nil, fmt.Errorf("нет параметров для хранилища")
 }
 
-// resolveString возвращает значение с приоритетом: флаг > env > файл > дефолт.
-func resolveString(flagValue, envKey, fileValue, defaultValue string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	if envValue := os.Getenv(envKey); envValue != "" {
-		return envValue
-	}
-	if fileValue != "" {
-		return fileValue
-	}
-	return defaultValue
+// flagValues — значения флагов для применения.
+type flagValues struct {
+	serverAddress   string
+	baseURL         string
+	fileStoragePath string
+	databaseDSN     string
+	auditFile       string
+	auditURL        string
+	enableHTTPS     bool
+	tlsCert         string
+	tlsKey          string
+	configPath      string
+	configPathLong  string
 }
 
-// resolveBool возвращает bool с приоритетом: флаг > env > файл > дефолт.
-// fileValue — указатель, чтобы отличить false от отсутствия поля в файле.
-func resolveBool(flagValue bool, envKey string, fileValue *bool, defaultValue bool) bool {
-	if flagValue {
-		return true
+// parseFlags регистрирует флаги в fs, парсит args и возвращает значения флагов
+// вместе с множеством имён, заданных явно. flag.Visit позволяет отличить
+// "флаг не задан" от "флаг задан явно в false" (важно для -s=false).
+func parseFlags(fs *flag.FlagSet, args []string) (flagValues, map[string]bool) {
+	serverAddress := fs.String("a", "", "адрес запуска HTTP-сервера")
+	baseURL := fs.String("b", "", "базовый адрес результирующего сокращённого URL")
+	fileStoragePath := fs.String("f", "", "путь до файла для хранения данных")
+	databaseDSN := fs.String("d", "", "DSN для подключения к PostgreSQL")
+	auditFile := fs.String("audit-file", "", "путь к файлу аудита")
+	auditURL := fs.String("audit-url", "", "URL сервера аудита")
+	enableHTTPS := fs.Bool("s", false, "включить HTTPS")
+	tlsCert := fs.String("tls-cert", "", "путь к TLS-сертификату")
+	tlsKey := fs.String("tls-key", "", "путь к TLS-ключу")
+	configPath := fs.String("c", "", "путь к JSON-файлу конфигурации")
+	configPathLong := fs.String("config", "", "путь к JSON-файлу конфигурации (длинная форма)")
+
+	// Для flag.CommandLine (ExitOnError) некорректные аргументы завершают процесс,
+	// для тестовых FlagSet (ContinueOnError) ошибка парсинга просто игнорируется.
+	_ = fs.Parse(args)
+
+	values := flagValues{
+		serverAddress:   *serverAddress,
+		baseURL:         *baseURL,
+		fileStoragePath: *fileStoragePath,
+		databaseDSN:     *databaseDSN,
+		auditFile:       *auditFile,
+		auditURL:        *auditURL,
+		enableHTTPS:     *enableHTTPS,
+		tlsCert:         *tlsCert,
+		tlsKey:          *tlsKey,
+		configPath:      *configPath,
+		configPathLong:  *configPathLong,
 	}
-	if envValue := os.Getenv(envKey); envValue != "" {
-		return parseBoolEnv(envKey)
+
+	return values, flagWasSet(fs)
+}
+
+// flagWasSet возвращает множество имён флагов, которые пользователь задал явно.
+func flagWasSet(fs *flag.FlagSet) map[string]bool {
+	set := make(map[string]bool)
+	fs.Visit(func(f *flag.Flag) {
+		set[f.Name] = true
+	})
+	return set
+}
+
+// applyFlagConfig применяет значения флагов, которые были заданы явно.
+// Флаги имеют абсолютный приоритет — даже -s=false перекрывает env и файл.
+func applyFlagConfig(cfg *Config, wasSet map[string]bool, values flagValues) {
+	if wasSet["a"] {
+		cfg.ServerAddress = values.serverAddress
 	}
-	if fileValue != nil {
-		return *fileValue
+	if wasSet["b"] {
+		cfg.BaseURL = values.baseURL
 	}
-	return defaultValue
+	if wasSet["f"] {
+		cfg.FileStoragePath = values.fileStoragePath
+	}
+	if wasSet["d"] {
+		cfg.DatabaseDSN = values.databaseDSN
+	}
+	if wasSet["audit-file"] {
+		cfg.AuditFile = values.auditFile
+	}
+	if wasSet["audit-url"] {
+		cfg.AuditURL = values.auditURL
+	}
+	if wasSet["s"] {
+		cfg.EnableHTTPS = values.enableHTTPS // ← даже false!
+	}
+	if wasSet["tls-cert"] {
+		cfg.TLSCertFile = values.tlsCert
+	}
+	if wasSet["tls-key"] {
+		cfg.TLSKeyFile = values.tlsKey
+	}
+}
+
+// applyFileConfig применяет поля из JSON-файла (перекрывают дефолты).
+func applyFileConfig(cfg *Config, fc *FileConfig) {
+	if fc.ServerAddress != "" {
+		cfg.ServerAddress = fc.ServerAddress
+	}
+	if fc.BaseURL != "" {
+		cfg.BaseURL = fc.BaseURL
+	}
+	if fc.FileStoragePath != "" {
+		cfg.FileStoragePath = fc.FileStoragePath
+	}
+	if fc.DatabaseDSN != "" {
+		cfg.DatabaseDSN = fc.DatabaseDSN
+	}
+	if fc.AuditFile != "" {
+		cfg.AuditFile = fc.AuditFile
+	}
+	if fc.AuditURL != "" {
+		cfg.AuditURL = fc.AuditURL
+	}
+	if fc.EnableHTTPS != nil {
+		cfg.EnableHTTPS = *fc.EnableHTTPS
+	}
+	if fc.TLSCertFile != "" {
+		cfg.TLSCertFile = fc.TLSCertFile
+	}
+	if fc.TLSKeyFile != "" {
+		cfg.TLSKeyFile = fc.TLSKeyFile
+	}
+	if fc.DeleteWorkerCount != nil {
+		cfg.DeleteWorkerCount = *fc.DeleteWorkerCount
+	}
+	if fc.DeleteQueueSize != nil {
+		cfg.DeleteQueueSize = *fc.DeleteQueueSize
+	}
+	if fc.DeleteBufferSize != nil {
+		cfg.DeleteBufferSize = *fc.DeleteBufferSize
+	}
+	if fc.DeleteFlushInterval != nil {
+		cfg.DeleteFlushInterval = *fc.DeleteFlushInterval
+	}
+	if fc.DeleteEnqueueTimeout != nil {
+		cfg.DeleteEnqueueTimeout = *fc.DeleteEnqueueTimeout
+	}
+}
+
+// applyEnvConfig применяет env-переменные (перекрывают файл).
+func applyEnvConfig(cfg *Config) {
+	if v := os.Getenv("SERVER_ADDRESS"); v != "" {
+		cfg.ServerAddress = v
+	}
+	if v := os.Getenv("BASE_URL"); v != "" {
+		cfg.BaseURL = v
+	}
+	if v := os.Getenv("FILE_STORAGE_PATH"); v != "" {
+		cfg.FileStoragePath = v
+	}
+	if v := os.Getenv("DATABASE_DSN"); v != "" {
+		cfg.DatabaseDSN = v
+	}
+	if v := os.Getenv("AUDIT_FILE"); v != "" {
+		cfg.AuditFile = v
+	}
+	if v := os.Getenv("AUDIT_URL"); v != "" {
+		cfg.AuditURL = v
+	}
+	if v := os.Getenv("ENABLE_HTTPS"); v != "" {
+		cfg.EnableHTTPS = parseBoolEnv("ENABLE_HTTPS")
+	}
+	if v := os.Getenv("TLS_CERT_FILE"); v != "" {
+		cfg.TLSCertFile = v
+	}
+	if v := os.Getenv("TLS_KEY_FILE"); v != "" {
+		cfg.TLSKeyFile = v
+	}
+	// Параметры воркера удаления.
+	cfg.DeleteWorkerCount = getEnvInt("DELETE_WORKER_COUNT", cfg.DeleteWorkerCount)
+	cfg.DeleteQueueSize = getEnvInt("DELETE_QUEUE_SIZE", cfg.DeleteQueueSize)
+	cfg.DeleteBufferSize = getEnvInt("DELETE_BUFFER_SIZE", cfg.DeleteBufferSize)
+	cfg.DeleteFlushInterval = getEnvDuration("DELETE_FLUSH_INTERVAL", cfg.DeleteFlushInterval)
+	cfg.DeleteEnqueueTimeout = getEnvDuration("DELETE_ENQUEUE_TIMEOUT", cfg.DeleteEnqueueTimeout)
 }
 
 // parseBoolEnv читает переменную окружения как bool.
@@ -187,18 +329,6 @@ func parseBoolEnv(envVar string) bool {
 	default:
 		return false
 	}
-}
-
-// getTLSFilePath разрешает путь к TLS-файлу по приоритету:
-// флаг → переменная окружения → значение по умолчанию.
-func getTLSFilePath(flagValue, envVar, defaultValue string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	if envValue := os.Getenv(envVar); envValue != "" {
-		return envValue
-	}
-	return defaultValue
 }
 
 // getEnvInt читает env-переменную как int. При ошибке парсинга возвращает defaultValue.
