@@ -75,6 +75,53 @@ Build commit: abc1234
 
 Если переменные не заданы — выводится `N/A`.
 
+## Конфигурация через JSON
+
+Поддерживается загрузка настроек из JSON-файла:
+
+```bash
+./shortener -c config.json
+# или
+./shortener --config config.json
+# или
+CONFIG=config.json ./shortener
+```
+
+Формат файла (см. `config.example.json`):
+
+```json
+{
+    "server_address": "localhost:8080",
+    "base_url": "http://localhost",
+    "file_storage_path": "/path/to/file.db",
+    "database_dsn": "",
+    "enable_https": true
+}
+```
+
+Все поля опциональны, незаданные берутся из env, флагов или дефолтов.
+Неизвестные поля игнорируются.
+
+### Приоритет источников
+
+1. Флаги командной строки (высший)
+2. Переменные окружения
+3. JSON-файл
+4. Дефолты (низший)
+
+Пример: `-a localhost:9090` перекроет `server_address` из файла,
+а `SERVER_ADDRESS=...` перекроет его при незаданном флаге.
+
+### Ошибки
+
+- Файл не найден → сервис не стартует с понятной ошибкой
+- Невалидный JSON → сервис не стартует с понятной ошибкой
+
+```text
+не удалось прочитать файл конфигурации "config.json": open config.json: no such file or directory
+невалидный JSON в файле "config.json": invalid character 'x' looking for beginning of value
+```
+
 ## HTTPS
 
 ### Генерация самоподписанного сертификата

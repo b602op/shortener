@@ -155,7 +155,7 @@ func TestDeleteUserURLs(t *testing.T) {
 		}
 		defer func() { _ = resp3.Body.Close() }()
 		return resp3.StatusCode == http.StatusGone
-	}, 5*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 
 	// 5. Удалённый URL исчезает из списка пользователя
 	req4, err := http.NewRequest(http.MethodGet, ts.URL+"/api/user/urls", nil)

@@ -2,11 +2,13 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/b602op/shortener/internal/repository"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewTest(t *testing.T) {
@@ -38,47 +40,161 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-func TestGetEnvOrFlag(t *testing.T) {
-	_ = os.Setenv("TEST_VAR", "from_env")
-	defer func() { _ = os.Unsetenv("TEST_VAR") }()
-
-	result := getEnvOrFlag("TEST_VAR", "from_flag")
-	if result != "from_env" {
-		t.Errorf("getEnvOrFlag with env set = %q, want 'from_env'", result)
-	}
-
-	_ = os.Unsetenv("TEST_VAR")
-	result = getEnvOrFlag("TEST_VAR", "from_flag")
-	if result != "from_flag" {
-		t.Errorf("getEnvOrFlag without env = %q, want 'from_flag'", result)
-	}
-}
-
-func TestGetFileStoragePath(t *testing.T) {
+func TestResolveString(t *testing.T) {
 	tests := []struct {
-		name     string
-		envValue string
-		flag     string
-		want     string
+		name         string
+		flagValue    string
+		envKey       string
+		envValue     string
+		fileValue    string
+		defaultValue string
+		want         string
 	}{
-		{name: "env приоритетнее флага", envValue: "/tmp/env.json", flag: "/tmp/flag.json", want: "/tmp/env.json"},
-		{name: "флаг при пустом env", envValue: "", flag: "/tmp/flag.json", want: "/tmp/flag.json"},
-		{name: "дефолт при пустых env и флаге", envValue: "", flag: "", want: defaultFileStoragePath},
+		{"флаг перекрывает env и файл", "flag", "TEST_RESOLVE_ENV", "env", "file", "default", "flag"},
+		{"env перекрывает файл", "", "TEST_RESOLVE_ENV", "env", "file", "default", "env"},
+		{"файл перекрывает дефолт", "", "TEST_RESOLVE_ENV", "", "file", "default", "file"},
+		{"дефолт при пустых флаге, env и файле", "", "TEST_RESOLVE_ENV", "", "", "default", "default"},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				_ = os.Setenv("FILE_STORAGE_PATH", tt.envValue)
-				defer func() { _ = os.Unsetenv("FILE_STORAGE_PATH") }()
+				t.Setenv(tt.envKey, tt.envValue)
 			} else {
-				_ = os.Unsetenv("FILE_STORAGE_PATH")
+				t.Setenv(tt.envKey, "")
 			}
 
-			if got := getFileStoragePath(tt.flag); got != tt.want {
-				t.Errorf("getFileStoragePath(%q) = %q, want %q", tt.flag, got, tt.want)
-			}
+			got := resolveString(tt.flagValue, tt.envKey, tt.fileValue, tt.defaultValue)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestResolveBool(t *testing.T) {
+	fileTrue := true
+	fileFalse := false
+
+	t.Run("флаг перекрывает env и файл", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "false")
+		got := resolveBool(true, "TEST_RESOLVE_BOOL", &fileFalse, false)
+		assert.True(t, got)
+	})
+
+	t.Run("env перекрывает файл", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "true")
+		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileFalse, false)
+		assert.True(t, got)
+	})
+
+	t.Run("env false перекрывает файл true", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "false")
+		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileTrue, false)
+		assert.False(t, got)
+	})
+
+	t.Run("файл true при пустом env", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "")
+		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileTrue, false)
+		assert.True(t, got)
+	})
+
+	t.Run("файл false при пустом env", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "")
+		got := resolveBool(false, "TEST_RESOLVE_BOOL", &fileFalse, true)
+		assert.False(t, got)
+	})
+
+	t.Run("дефолт при пустом env и отсутствии поля в файле", func(t *testing.T) {
+		t.Setenv("TEST_RESOLVE_BOOL", "")
+		got := resolveBool(false, "TEST_RESOLVE_BOOL", nil, true)
+		assert.True(t, got)
+	})
+}
+
+func TestLoadFileConfig_NotFound(t *testing.T) {
+	_, err := loadFileConfig("/nonexistent/config.json")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "не удалось прочитать файл конфигурации")
+}
+
+func TestLoadFileConfig_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{invalid`), 0644))
+
+	_, err := loadFileConfig(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "невалидный JSON")
+}
+
+func TestLoadFileConfig_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+        "server_address": "example.com:9090",
+        "enable_https": true
+    }`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "example.com:9090", cfg.ServerAddress)
+	assert.NotNil(t, cfg.EnableHTTPS)
+	assert.True(t, *cfg.EnableHTTPS)
+}
+
+func TestLoadFileConfig_EnableHTTPSFalse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"enable_https": false}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.NotNil(t, cfg.EnableHTTPS)
+	assert.False(t, *cfg.EnableHTTPS)
+}
+
+func TestLoadFileConfig_EnableHTTPSAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"server_address": ":8080"}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Nil(t, cfg.EnableHTTPS)
+}
+
+func TestLoadFileConfig_UnknownFieldsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+        "server_address": ":8080",
+        "unknown_field": "value"
+    }`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, ":8080", cfg.ServerAddress)
+}
+
+func TestLoadFileConfig_AllFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{
+        "server_address": "localhost:9090",
+        "base_url": "http://localhost:9090",
+        "file_storage_path": "/tmp/storage.json",
+        "database_dsn": "postgres://localhost/db",
+        "enable_https": true
+    }`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "localhost:9090", cfg.ServerAddress)
+	assert.Equal(t, "http://localhost:9090", cfg.BaseURL)
+	assert.Equal(t, "/tmp/storage.json", cfg.FileStoragePath)
+	assert.Equal(t, "postgres://localhost/db", cfg.DatabaseDSN)
+	assert.NotNil(t, cfg.EnableHTTPS)
+	assert.True(t, *cfg.EnableHTTPS)
 }
 
 func TestGetEnvInt(t *testing.T) {
@@ -198,23 +314,6 @@ func TestParseBoolEnv(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
-}
-
-func TestGetEnableHTTPS(t *testing.T) {
-	t.Run("флаг -s перекрывает env со значением false", func(t *testing.T) {
-		t.Setenv("ENABLE_HTTPS", "false")
-		assert.True(t, getEnableHTTPS(true), "включённый флаг -s должен перекрыть env")
-	})
-
-	t.Run("env включает при выключенном флаге", func(t *testing.T) {
-		t.Setenv("ENABLE_HTTPS", "true")
-		assert.True(t, getEnableHTTPS(false))
-	})
-
-	t.Run("всё выключено", func(t *testing.T) {
-		t.Setenv("ENABLE_HTTPS", "false")
-		assert.False(t, getEnableHTTPS(false))
-	})
 }
 
 func TestGetTLSFilePath(t *testing.T) {
