@@ -4,16 +4,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 // FileConfig описывает конфигурацию из JSON-файла.
 // Все поля опциональны — незаданные берутся из env/флагов/дефолтов.
+// Поля-указатели позволяют отличить явно заданное нулевое значение
+// (false, 0) от отсутствия поля в файле.
 type FileConfig struct {
+	// Основные
 	ServerAddress   string `json:"server_address"`
 	BaseURL         string `json:"base_url"`
 	FileStoragePath string `json:"file_storage_path"`
 	DatabaseDSN     string `json:"database_dsn"`
-	EnableHTTPS     *bool  `json:"enable_https"` // указатель, чтобы отличить false от отсутствия
+
+	// HTTPS
+	EnableHTTPS *bool  `json:"enable_https"` // указатель, чтобы отличить false от отсутствия
+	TLSCertFile string `json:"tls_cert_file"`
+	TLSKeyFile  string `json:"tls_key_file"`
+
+	// Аудит
+	AuditFile string `json:"audit_file"`
+	AuditURL  string `json:"audit_url"`
+
+	// Воркер удаления.
+	// Поля *time.Duration задаются числом наносекунд (см. README).
+	DeleteWorkerCount    *int           `json:"delete_worker_count"`
+	DeleteQueueSize      *int           `json:"delete_queue_size"`
+	DeleteBufferSize     *int           `json:"delete_buffer_size"`
+	DeleteFlushInterval  *time.Duration `json:"delete_flush_interval"`
+	DeleteEnqueueTimeout *time.Duration `json:"delete_enqueue_timeout"`
 }
 
 // loadFileConfig читает и парсит JSON-файл конфигурации.

@@ -3,5 +3,14 @@
     "base_url": "http://localhost",
     "file_storage_path": "/path/to/file.db",
     "database_dsn": "",
-    "enable_https": true
+    "enable_https": true,
+    "tls_cert_file": "./certs/cert.pem",
+    "tls_key_file": "./certs/key.pem",
+    "audit_file": "/path/to/audit.log",
+    "audit_url": "http://audit.example.com/events",
+    "delete_worker_count": 5,
+    "delete_queue_size": 1024,
+    "delete_buffer_size": 100,
+    "delete_flush_interval": 1000000000,
+    "delete_enqueue_timeout": 100000000
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -203,7 +204,7 @@ type Plain struct {
 	assert.Equal(t, 0, n)
 
 	_, err = os.Stat(filepath.Join(dir, generatedFileName))
-	assert.True(t, os.IsNotExist(err), "файл reset.gen.go не должен создаваться")
+	assert.True(t, errors.Is(err, os.ErrNotExist), "файл reset.gen.go не должен создаваться")
 }
 
 // TestStaleFileRemoved проверяет удаление устаревшего reset.gen.go
@@ -218,7 +219,7 @@ func TestStaleFileRemoved(t *testing.T) {
 	assert.Equal(t, 0, n)
 
 	_, err = os.Stat(filepath.Join(dir, generatedFileName))
-	assert.True(t, os.IsNotExist(err), "устаревший файл должен быть удалён")
+	assert.True(t, errors.Is(err, os.ErrNotExist), "устаревший файл должен быть удалён")
 }
 
 // TestRunRecursive проверяет рекурсивный обход директорий из корня.
