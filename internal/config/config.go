@@ -8,12 +8,17 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/b602op/shortener/internal/repository"
 )
 
-const defaultFileStoragePath = "data/storage.json"
+const (
+	defaultFileStoragePath = "data/storage.json"
+	defaultTLSCertFile     = "./certs/cert.pem"
+	defaultTLSKeyFile      = "./certs/key.pem"
+)
 
 // Config — настройки HTTP-сервера, базового адреса, хранилища, аудита
 // и воркера удаления. Собирается функцией New из флагов и переменных окружения.
@@ -24,6 +29,9 @@ type Config struct {
 	BaseURL              string
 	FileStoragePath      string
 	DatabaseDSN          string
+	EnableHTTPS          bool
+	TLSCertFile          string // путь к TLS-сертификату
+	TLSKeyFile           string // путь к TLS-ключу
 	storage              repository.Store
 	DeleteWorkerCount    int           `env:"DELETE_WORKER_COUNT" envDefault:"5"`
 	DeleteQueueSize      int           `env:"DELETE_QUEUE_SIZE" envDefault:"1024"`
@@ -43,6 +51,9 @@ func New() (*Config, error) {
 	databaseDSN := flag.String("d", "", "DSN для подключения к PostgreSQL")
 	auditFile := flag.String("audit-file", "", "путь к файлу аудита")
 	auditURL := flag.String("audit-url", "", "URL сервера аудита")
+	enableHTTPS := flag.Bool("s", false, "включить HTTPS")
+	tlsCert := flag.String("tls-cert", "", "путь к TLS-сертификату")
+	tlsKey := flag.String("tls-key", "", "путь к TLS-ключу")
 
 	flag.Parse()
 
@@ -53,6 +64,13 @@ func New() (*Config, error) {
 	auditFileValue := getEnvOrFlag("AUDIT_FILE", *auditFile)
 	auditURLValue := getEnvOrFlag("AUDIT_URL", *auditURL)
 
+	// HTTPS: флаг -s перекрывает ENABLE_HTTPS.
+	enableHTTPSValue := getEnableHTTPS(*enableHTTPS)
+
+	// Пути к сертификатам: флаг → env → дефолт.
+	tlsCertValue := getTLSFilePath(*tlsCert, "TLS_CERT_FILE", defaultTLSCertFile)
+	tlsKeyValue := getTLSFilePath(*tlsKey, "TLS_KEY_FILE", defaultTLSKeyFile)
+
 	config := &Config{
 		ServerAddress:   serverAddressValue,
 		BaseURL:         baseURLValue,
@@ -60,6 +78,9 @@ func New() (*Config, error) {
 		DatabaseDSN:     databaseDSNValue,
 		AuditFile:       auditFileValue,
 		AuditURL:        auditURLValue,
+		EnableHTTPS:     enableHTTPSValue,
+		TLSCertFile:     tlsCertValue,
+		TLSKeyFile:      tlsKeyValue,
 
 		// Параметры воркера удаления. Значения по умолчанию,
 		// переопределяются через env DELETE_*.
@@ -121,6 +142,39 @@ func getEnvOrFlag(envVar, flagValue string) string {
 		return envValue
 	}
 	return flagValue
+}
+
+// parseBoolEnv читает переменную окружения как bool.
+// Возвращает true для "true", "1", "yes" (регистр не важен).
+func parseBoolEnv(envVar string) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(envVar)))
+	switch raw {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// getEnableHTTPS разрешает включение HTTPS по приоритету:
+// флаг -s перекрывает переменную окружения ENABLE_HTTPS.
+func getEnableHTTPS(flagValue bool) bool {
+	if flagValue {
+		return true
+	}
+	return parseBoolEnv("ENABLE_HTTPS")
+}
+
+// getTLSFilePath разрешает путь к TLS-файлу по приоритету:
+// флаг → переменная окружения → значение по умолчанию.
+func getTLSFilePath(flagValue, envVar, defaultValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if envValue := os.Getenv(envVar); envValue != "" {
+		return envValue
+	}
+	return defaultValue
 }
 
 func getFileStoragePath(flagValue string) string {
@@ -220,4 +274,19 @@ func (c *Config) GetFileStoragePath() string {
 // GetDatabaseDSN возвращает строку подключения к PostgreSQL; пустая — если БД не задана.
 func (c *Config) GetDatabaseDSN() string {
 	return c.DatabaseDSN
+}
+
+// GetEnableHTTPS возвращает признак запуска сервера в режиме HTTPS.
+func (c *Config) GetEnableHTTPS() bool {
+	return c.EnableHTTPS
+}
+
+// GetTLSCertFile возвращает путь к TLS-сертификату.
+func (c *Config) GetTLSCertFile() string {
+	return c.TLSCertFile
+}
+
+// GetTLSKeyFile возвращает путь к TLS-ключу.
+func (c *Config) GetTLSKeyFile() string {
+	return c.TLSKeyFile
 }
