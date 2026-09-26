@@ -31,6 +31,13 @@ func Handler(deps Dependencies) http.Handler {
 		r.Delete("/api/user/urls", MethodDeleteUserURLs(deps.DeleteService))
 	})
 
+	// Статистика сервиса — защищается только доверенной подсетью (X-Real-IP),
+	// без аутентификации через JWT.
+	if deps.Config != nil {
+		statsHandler := NewStatsHandler(deps.Store, deps.Config.TrustedSubnetNet())
+		r.Get("/api/internal/stats", statsHandler.GetStats)
+	}
+
 	// Редирект по короткой ссылке — без аутентификации
 	r.Get("/{id}", MethodGet(deps.Config, deps.Store, deps.AuditService))
 

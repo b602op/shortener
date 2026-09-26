@@ -36,6 +36,13 @@ type Store interface {
 	Select(shortURL string) (URLRecord, bool)
 	SelectByUser(userID string) []URLRecord
 	DeleteByUser(userID string, shortURLs []string) error
+
+	// CountURLs возвращает общее количество сокращённых URL.
+	CountURLs() (int, error)
+
+	// CountUsers возвращает количество уникальных пользователей,
+	// которые сокращали URL.
+	CountUsers() (int, error)
 }
 
 // FileStorage хранит записи в памяти и при наличии пути дублирует их в файл.
@@ -295,6 +302,22 @@ func (s *FileStorage) SelectByUser(userID string) []URLRecord {
 	}
 
 	return records
+}
+
+// CountURLs возвращает количество записей в хранилище.
+func (s *FileStorage) CountURLs() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return len(s.data), nil
+}
+
+// CountUsers возвращает количество уникальных user_id.
+func (s *FileStorage) CountUsers() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return len(s.userURLs), nil
 }
 
 // DeleteByUser помечает переданные URL удалёнными, но только принадлежащие userID.

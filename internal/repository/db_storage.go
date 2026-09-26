@@ -258,3 +258,23 @@ func (s *DBStorage) Close() error {
 func (s *DBStorage) DB() *sql.DB {
 	return s.db
 }
+
+// CountURLs возвращает количество записей в таблице urls.
+func (s *DBStorage) CountURLs() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM urls").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("ошибка подсчёта URL: %w", err)
+	}
+	return count, nil
+}
+
+// CountUsers возвращает количество уникальных user_id в таблице urls.
+func (s *DBStorage) CountUsers() (int, error) {
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(DISTINCT user_id) FROM urls").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("ошибка подсчёта пользователей: %w", err)
+	}
+	return count, nil
+}
