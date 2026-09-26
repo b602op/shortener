@@ -130,6 +130,7 @@ CONFIG=config.json ./shortener
 | `delete_flush_interval` | `DELETE_FLUSH_INTERVAL` | — | `1s` |
 | `delete_enqueue_timeout` | `DELETE_ENQUEUE_TIMEOUT` | — | `100ms` |
 | `trusted_subnet` | `TRUSTED_SUBNET` | `-t` / `--trusted-subnet` | `""` |
+| `grpc_address` | `GRPC_ADDRESS` | `-g` | `localhost:9090` |
 
 > **Наносекунды:** поля `delete_flush_interval` и `delete_enqueue_timeout` — числа
 > в наносекундах (`1000000000` = 1 секунда, `100000000` = 100 миллисекунд).
@@ -254,3 +255,91 @@ TRUSTED_SUBNET=192.168.1.0/24 ./shortener
 ```
 
 Невалидный CIDR в конфиге → сервер не стартует с понятной ошибкой.
+
+## gRPC
+
+Кроме HTTP, сервис поднимает gRPC-сервер (`shortener.v1.ShortenerService`)
+на отдельном порту — параллельно с HTTP, без cmux.
+
+### Методы
+
+| RPC | Аналог HTTP | Описание |
+|---|---|---|
+| `ShortenURL` | `POST /api/shorten` | сократить URL |
+| `ExpandURL` | `GET /{id}` | оригинальный URL по короткому ID (без HTTP-редиректа) |
+| `ListUserURLs` | `GET /api/user/urls` | все URL пользователя (запрос — `google.protobuf.Empty`) |
+
+Контракт: `api/shortener/v1/shortener.proto`, сгенерированный код — `gen/pb/shortener/v1/`.
+
+### Запуск
+
+```bash
+# Через флаг
+./shortener -g localhost:9090
+
+# Через переменную окружения
+GRPC_ADDRESS=localhost:9090 ./shortener
+
+# Отключить gRPC (явный пустой флаг)
+./shortener -g ""
+```
+
+По умолчанию gRPC слушает `localhost:9090`.
+
+### Авторизация
+
+Идентификатор пользователя передаётся в metadata:
+
+```text
+authorization: Bearer <JWT>
+```
+
+JWT подписывается тем же секретом (`AUTH_SECRET_KEY`), что и кука HTTP,
+поэтому токен из HTTP-куки подходит и для gRPC.
+Без/с невалидным токеном — статус `Unauthenticated`.
+
+### TLS
+
+Если включён HTTPS (`-s` / `ENABLE_HTTPS=true`), gRPC поднимается с TLS
+на тех же сертификатах (`-tls-cert` / `-tls-key`). HTTP без TLS → gRPC без TLS.
+
+### Пример клиента
+
+```go
+conn, err := grpc.NewClient("localhost:9090",
+    grpc.WithTransportCredentials(insecure.NewCredentials())) // или credentials.NewClientTLSFromFile
+if err != nil { log.Fatal(err) }
+defer conn.Close()
+
+client := pb.NewShortenerServiceClient(conn)
+
+ctx := metadata.AppendToOutgoingContext(context.Background(),
+    "authorization", "Bearer "+token)
+
+resp, err := client.ShortenURL(ctx, pb.URLShortenRequest_builder{
+    Url: &url,
+}.Build())
+```
+
+### Кодогенерация
+
+Прото-файл: `api/shortener/v1/shortener.proto`. Регенерация кода в `gen/pb/shortener/v1/`:
+
+```bash
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+protoc \
+  --go_out=. --go_opt=module=github.com/b602op/shortener \
+  --go_opt=default_api_level=API_OPAQUE \
+  --go-grpc_out=. --go-grpc_opt=module=github.com/b602op/shortener \
+  -I . \
+  -I <путь к include из дистрибутива protoc> \
+  api/shortener/v1/shortener.proto
+```
+
+Сгенерированный код коммитится в репозиторий (`gen/pb/shortener/v1/`).
+
+`-I <include>` — путь к well-known типам (`google/protobuf/empty.proto`):
+идёт в комплекте с protoc (папка `include/` в дистрибутиве
+[protobuf releases](https://github.com/protocolbuffers/protobuf/releases)).

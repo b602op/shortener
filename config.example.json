@@ -13,5 +13,6 @@
     "delete_buffer_size": 100,
     "delete_flush_interval": 1000000000,
     "delete_enqueue_timeout": 100000000,
-    "trusted_subnet": "192.168.1.0/24"
+    "trusted_subnet": "192.168.1.0/24",
+    "grpc_address": "localhost:9090"
 }

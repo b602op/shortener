@@ -6,8 +6,7 @@ import (
 	"net/http"
 
 	"github.com/b602op/shortener/internal/auth"
-	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/service"
 )
 
 type userURLResponse struct {
@@ -16,10 +15,11 @@ type userURLResponse struct {
 }
 
 // MethodGetUserURLs возвращает все URL, сокращённые пользователем.
+// Выборка — в общем сервисе.
 // 401 — если кука присутствует, но не содержит валидный ID пользователя.
 // 204 — если пользователь ещё не сокращал URL.
 // 200 — список сокращённых URL в формате JSON.
-func MethodGetUserURLs(cfg *config.Config, store repository.Store) http.HandlerFunc {
+func MethodGetUserURLs(svc *service.ShortenerService) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен GET запрос к API", "uri", req.RequestURI)
 
@@ -29,7 +29,13 @@ func MethodGetUserURLs(cfg *config.Config, store repository.Store) http.HandlerF
 			return
 		}
 
-		records := store.SelectByUser(userID)
+		records, err := svc.ListUserURLs(req.Context(), userID)
+		if err != nil {
+			slog.Error("Ошибка выбора записей", "error", err)
+			respondWithError(res, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
 		if len(records) == 0 {
 			res.WriteHeader(http.StatusNoContent)
 			return
@@ -38,7 +44,7 @@ func MethodGetUserURLs(cfg *config.Config, store repository.Store) http.HandlerF
 		response := make([]userURLResponse, 0, len(records))
 		for _, record := range records {
 			response = append(response, userURLResponse{
-				ShortURL:    cfg.GetBaseURL() + "/" + record.ShortURL,
+				ShortURL:    svc.FullShortURL(record.ShortURL),
 				OriginalURL: record.OriginalURL,
 			})
 		}

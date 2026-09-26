@@ -610,3 +610,53 @@ func TestTrustedSubnet_InvalidCIDRRejected(t *testing.T) {
 		assert.Error(t, err, "CIDR %q должен быть невалидным", invalid)
 	}
 }
+
+func TestGRPCAddress_DefaultAndSources(t *testing.T) {
+	// Дефолт — localhost:9090
+	cfg := &Config{GRPCAddress: defaultGRPCAddress}
+	assert.Equal(t, "localhost:9090", cfg.GetGRPCAddress())
+
+	// Env перекрывает дефолт
+	t.Setenv("GRPC_ADDRESS", "localhost:9191")
+	cfg = &Config{GRPCAddress: defaultGRPCAddress}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "localhost:9191", cfg.GRPCAddress)
+
+	// Пустой env не перекрывает
+	t.Setenv("GRPC_ADDRESS", "")
+	cfg = &Config{GRPCAddress: "localhost:9090"}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "localhost:9090", cfg.GRPCAddress)
+
+	// Файл перекрывает дефолт
+	cfg = &Config{GRPCAddress: defaultGRPCAddress}
+	applyFileConfig(cfg, &FileConfig{GRPCAddress: "localhost:9292"})
+	assert.Equal(t, "localhost:9292", cfg.GRPCAddress)
+
+	// Явный флаг -g "" отключает gRPC даже при заданном env
+	t.Setenv("GRPC_ADDRESS", "localhost:9191")
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-g", ""})
+	cfg = &Config{GRPCAddress: "localhost:9191"}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Empty(t, cfg.GetGRPCAddress())
+
+	// Флаг -g перекрывает env
+	fs = flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet = parseFlags(fs, []string{"-g", "localhost:9393"})
+	assert.Contains(t, wasSet, "g")
+	cfg = &Config{GRPCAddress: "localhost:9191"}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Equal(t, "localhost:9393", cfg.GRPCAddress)
+}
+
+func TestGRPCAddress_FileConfigParsing(t *testing.T) {
+	// Парсинг grpc_address из JSON
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"grpc_address": "localhost:9494"}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "localhost:9494", cfg.GRPCAddress)
+}

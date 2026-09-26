@@ -23,7 +23,7 @@ func TestAudit_ShortenViaRoot(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com/audit-root"))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, storage, mock)(rec, req)
+	MethodPost(newTestService(cfg, storage), mock)(rec, req)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
 	require.Eventually(t, func() bool {
@@ -44,7 +44,7 @@ func TestAudit_ShortenViaAPI(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, mock)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), mock)(rec, req)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
 	require.Eventually(t, func() bool {
@@ -67,7 +67,7 @@ func TestAudit_Follow(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/testshort", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage, mock)(rec, req)
+	MethodGet(newTestService(cfg, storage), mock)(rec, req)
 	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 
 	require.Eventually(t, func() bool {
@@ -99,7 +99,7 @@ func TestAudit_HTTPObserverIntegration(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("http://example.com/e2e"))
 	rec := httptest.NewRecorder()
 
-	MethodPost(cfg, store, auditService)(rec, req)
+	MethodPost(newTestService(cfg, store), auditService)(rec, req)
 	require.Equal(t, http.StatusCreated, rec.Code)
 
 	select {

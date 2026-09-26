@@ -19,6 +19,7 @@ const (
 	defaultFileStoragePath = "data/storage.json"
 	defaultTLSCertFile     = "./certs/cert.pem"
 	defaultTLSKeyFile      = "./certs/key.pem"
+	defaultGRPCAddress     = "localhost:9090"
 )
 
 // Config — настройки HTTP-сервера, базового адреса, хранилища, аудита
@@ -44,6 +45,10 @@ type Config struct {
 	TrustedSubnet string
 	// trustedSubnetNet — распарсенный CIDR, nil если подсеть не задана.
 	trustedSubnetNet *net.IPNet
+
+	// GRPCAddress — адрес gRPC-сервера (отдельный порт, параллельно с HTTP).
+	// Пустая строка — gRPC-сервер не запускается.
+	GRPCAddress string
 }
 
 // New читает флаги, переменные окружения и JSON-файл конфигурации,
@@ -92,6 +97,7 @@ func New() (*Config, error) {
 		DeleteBufferSize:     100,
 		DeleteFlushInterval:  time.Second,
 		DeleteEnqueueTimeout: 100 * time.Millisecond,
+		GRPCAddress:          defaultGRPCAddress,
 	}
 
 	// 2. Файл (перекрывает дефолты).
@@ -174,6 +180,7 @@ type flagValues struct {
 	configPathLong    string
 	trustedSubnet     string
 	trustedSubnetLong string
+	grpcAddress       string
 }
 
 // parseFlags регистрирует флаги в fs, парсит args и возвращает значения флагов
@@ -193,6 +200,7 @@ func parseFlags(fs *flag.FlagSet, args []string) (flagValues, map[string]bool) {
 	configPathLong := fs.String("config", "", "путь к JSON-файлу конфигурации (длинная форма)")
 	trustedSubnet := fs.String("t", "", "CIDR доверенной подсети")
 	trustedSubnetLong := fs.String("trusted-subnet", "", "CIDR доверенной подсети (длинная форма)")
+	grpcAddress := fs.String("g", "", "адрес gRPC-сервера (пустая строка — отключить gRPC)")
 
 	// Для flag.CommandLine (ExitOnError) некорректные аргументы завершают процесс,
 	// для тестовых FlagSet (ContinueOnError) ошибка парсинга просто игнорируется.
@@ -212,6 +220,7 @@ func parseFlags(fs *flag.FlagSet, args []string) (flagValues, map[string]bool) {
 		configPathLong:    *configPathLong,
 		trustedSubnet:     *trustedSubnet,
 		trustedSubnetLong: *trustedSubnetLong,
+		grpcAddress:       *grpcAddress,
 	}
 
 	return values, flagWasSet(fs)
@@ -260,6 +269,10 @@ func applyFlagConfig(cfg *Config, wasSet map[string]bool, values flagValues) {
 		cfg.TrustedSubnet = values.trustedSubnet
 	} else if wasSet["trusted-subnet"] {
 		cfg.TrustedSubnet = values.trustedSubnetLong
+	}
+	// Явный -g "" отключает gRPC-сервер, перекрывая дефолт.
+	if wasSet["g"] {
+		cfg.GRPCAddress = values.grpcAddress
 	}
 }
 
@@ -310,6 +323,9 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.TrustedSubnet != "" {
 		cfg.TrustedSubnet = fc.TrustedSubnet
 	}
+	if fc.GRPCAddress != "" {
+		cfg.GRPCAddress = fc.GRPCAddress
+	}
 }
 
 // applyEnvConfig применяет env-переменные (перекрывают файл).
@@ -350,6 +366,9 @@ func applyEnvConfig(cfg *Config) {
 
 	if v := os.Getenv("TRUSTED_SUBNET"); v != "" {
 		cfg.TrustedSubnet = v
+	}
+	if v := os.Getenv("GRPC_ADDRESS"); v != "" {
+		cfg.GRPCAddress = v
 	}
 }
 
@@ -478,4 +497,10 @@ func (c *Config) GetTrustedSubnet() string {
 // nil — если подсеть не задана (доступ к /api/internal/stats запрещён всем).
 func (c *Config) TrustedSubnetNet() *net.IPNet {
 	return c.trustedSubnetNet
+}
+
+// GetGRPCAddress возвращает адрес gRPC-сервера.
+// Пустая строка — gRPC-сервер не запускается.
+func (c *Config) GetGRPCAddress() string {
+	return c.GRPCAddress
 }

@@ -10,18 +10,25 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	pb "github.com/b602op/shortener/gen/pb/shortener/v1"
 	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
 	"github.com/b602op/shortener/internal/config"
+	"github.com/b602op/shortener/internal/grpcserver"
 	"github.com/b602op/shortener/internal/handler"
 	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/service"
 	"github.com/b602op/shortener/internal/worker"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 // Информация о сборке. Заполняется через -ldflags при сборке:
@@ -119,20 +126,29 @@ func run() error {
 	}
 	authService := auth.NewService(secretKey)
 
-	// 3. Аудит
+	// 3. Общий слой бизнес-логики (фасад для HTTP и gRPC)
+	shortenerService := service.NewShortenerService(store, baseURL)
+
+	// 4. Аудит
 	auditService, auditClosers, err := setupAudit(cfg)
 	if err != nil {
 		return err
 	}
 	closers = append(closers, auditClosers...)
 
-	// 4. Worker
+	// 5. Worker
 	deleteService, workerClosers := setupWorker(cfg, store)
 	closers = append(closers, workerClosers...)
 
 	// === HTTP-сервер ===
-	httpHandler := setupHandler(cfg, store, authService, deleteService, auditService)
+	httpHandler := setupHandler(cfg, store, shortenerService, authService, deleteService, auditService)
 	server := &http.Server{Addr: addr, Handler: httpHandler}
+
+	// === gRPC-сервер (параллельно с HTTP, отдельный порт) ===
+	grpcServer, grpcListener, err := setupGRPC(cfg, shortenerService, authService)
+	if err != nil {
+		return err
+	}
 
 	// === Контекст с сигналом ===
 	// SIGQUIT обрабатывается так же, как SIGINT/SIGTERM — graceful shutdown
@@ -144,13 +160,22 @@ func run() error {
 	)
 	defer stop()
 
-	// === Запуск сервера ===
+	// === Запуск серверов ===
 	serverErr := make(chan error, 1)
 	go serveServer(server, cfg, addr, serverErr)
 
-	// === Ожидание сигнала или ошибки сервера ===
+	grpcErr := make(chan error, 1)
+	if grpcServer != nil {
+		go serveGRPC(grpcServer, grpcListener, cfg.GetGRPCAddress(), grpcErr)
+	}
+
+	// === Ожидание сигнала или ошибки серверов ===
 	select {
 	case srvErr := <-serverErr:
+		stop()
+		return srvErr
+	case srvErr := <-grpcErr:
+		stop()
 		return srvErr
 	case <-ctx.Done():
 		log.Println("Получен сигнал завершения, начинаем graceful shutdown...")
@@ -165,8 +190,13 @@ func run() error {
 	if err != nil {
 		log.Printf("Ошибка завершения сервера: %v", err)
 	}
-
 	log.Println("HTTP-сервер остановлен")
+
+	if grpcServer != nil {
+		grpcServer.GracefulStop()
+		log.Println("gRPC-сервер остановлен")
+	}
+
 	return nil
 }
 
@@ -231,18 +261,94 @@ func setupWorker(cfg *config.Config, store repository.Store) (*worker.DeleteServ
 func setupHandler(
 	cfg *config.Config,
 	store repository.Store,
+	shortenerService *service.ShortenerService,
 	authService *auth.Service,
 	deleteService *worker.DeleteService,
 	auditService *audit.Service,
 ) http.Handler {
 	deps := handler.Dependencies{
-		Config:        cfg,
-		Store:         store,
-		AuthService:   authService,
-		DeleteService: deleteService,
-		AuditService:  auditService,
+		Config:           cfg,
+		Store:            store,
+		ShortenerService: shortenerService,
+		AuthService:      authService,
+		DeleteService:    deleteService,
+		AuditService:     auditService,
 	}
 	return handler.Handler(deps)
+}
+
+// setupGRPC создаёт gRPC-сервер и слушатель на отдельном порту.
+// Если GRPCAddress пуст — gRPC отключён, возвращается (nil, nil, nil).
+// TLS включается теми же настройками, что и у HTTP-сервера.
+func setupGRPC(
+	cfg *config.Config,
+	shortenerService *service.ShortenerService,
+	authService *auth.Service,
+) (*grpc.Server, net.Listener, error) {
+	if cfg.GetGRPCAddress() == "" {
+		log.Println("gRPC-сервер отключён (grpc_address пуст)")
+		return nil, nil, nil
+	}
+
+	listener, err := net.Listen("tcp", cfg.GetGRPCAddress())
+	if err != nil {
+		// Занятый порт не должен ронять HTTP-сервер: логируем и работаем без gRPC.
+		log.Printf("gRPC-сервер не запущен, ошибка слушателя %s: %v", cfg.GetGRPCAddress(), err)
+		return nil, nil, nil
+	}
+
+	var opts []grpc.ServerOption
+
+	// TLS — те же настройки, что у HTTP
+	if cfg.GetEnableHTTPS() {
+		creds, err := credentials.NewServerTLSFromFile(cfg.GetTLSCertFile(), cfg.GetTLSKeyFile())
+		if err != nil {
+			_ = listener.Close()
+			return nil, nil, fmt.Errorf("gRPC TLS: %w", err)
+		}
+		opts = append(opts, grpc.Creds(creds))
+	}
+
+	// Интерцептор логирования всех unary-запросов
+	opts = append(opts, grpc.UnaryInterceptor(grpcLoggingInterceptor))
+
+	server := grpc.NewServer(opts...)
+	pb.RegisterShortenerServiceServer(server, grpcserver.NewServer(shortenerService, authService))
+
+	return server, listener, nil
+}
+
+// serveGRPC запускает gRPC-сервер на переданном слушателе.
+// Ошибки отправляются в канал grpcErr.
+func serveGRPC(server *grpc.Server, listener net.Listener, addr string, grpcErr chan<- error) {
+	log.Printf("gRPC-сервер слушает %s", addr)
+	if err := server.Serve(listener); err != nil {
+		grpcErr <- err
+	}
+}
+
+// grpcLoggingInterceptor логирует unary-запросы gRPC: метод и итоговый статус.
+func grpcLoggingInterceptor(
+	ctx context.Context,
+	req interface{},
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (interface{}, error) {
+	start := time.Now()
+	resp, err := handler(ctx, req)
+	log.Printf("gRPC %s %s %v", info.FullMethod, statusString(err), time.Since(start))
+	return resp, err
+}
+
+// statusString возвращает строковый код статуса gRPC-ошибки или "OK".
+func statusString(err error) string {
+	if err == nil {
+		return "OK"
+	}
+	if s, ok := status.FromError(err); ok {
+		return s.Code().String()
+	}
+	return "Unknown"
 }
 
 // serveServer запускает HTTP или HTTPS сервер в зависимости от конфигурации.

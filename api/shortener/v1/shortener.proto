@@ -1,0 +1,63 @@
+// Контракт gRPC-сервиса сокращения URL.
+//
+// Код генерируется в gen/pb/shortener/v1 (см. Makefile / README).
+edition = "2023";
+
+package shortener.v1;
+
+option go_package = "github.com/b602op/shortener/gen/pb/shortener/v1;shortenerv1";
+
+import "google/protobuf/empty.proto";
+
+// ShortenerService — gRPC-аналог HTTP API сокращения URL.
+service ShortenerService {
+  // ShortenURL сокращает URL (аналог POST /api/shorten).
+  rpc ShortenURL(URLShortenRequest) returns (URLShortenResponse);
+
+  // ExpandURL возвращает оригинальный URL по короткому идентификатору
+  // (аналог GET /{id}, но без HTTP-редиректа).
+  rpc ExpandURL(URLExpandRequest) returns (URLExpandResponse);
+
+  // ListUserURLs возвращает все URL, сокращённые пользователем
+  // (аналог GET /api/user/urls).
+  rpc ListUserURLs(google.protobuf.Empty) returns (UserURLsResponse);
+}
+
+// URLShortenRequest — запрос на сокращение URL.
+message URLShortenRequest {
+  // Исходный (оригинальный) URL.
+  string url = 1;
+}
+
+// URLShortenResponse — ответ с короткой ссылкой.
+message URLShortenResponse {
+  // Полный короткий URL (base_url + "/" + id).
+  string result = 1;
+}
+
+// URLExpandRequest — запрос оригинального URL по короткому идентификатору.
+message URLExpandRequest {
+  // Короткий идентификатор (без base_url).
+  string id = 1;
+}
+
+// URLExpandResponse — ответ с оригинальным URL.
+message URLExpandResponse {
+  // Оригинальный URL.
+  string result = 1;
+}
+
+// UserURLsResponse — список URL пользователя.
+message UserURLsResponse {
+  // Сокращённые пользователем ссылки.
+  repeated URLData url = 1;
+}
+
+// URLData — пара короткой и оригинальной ссылки.
+message URLData {
+  // Полный короткий URL.
+  string short_url = 1;
+
+  // Оригинальный URL.
+  string original_url = 2;
+}

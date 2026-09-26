@@ -31,7 +31,7 @@ func TestMethodPostAPI_Basic(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, nil)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusCreated, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -55,7 +55,7 @@ func TestMethodPostAPI_EmptyBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, nil)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -77,7 +77,7 @@ func TestMethodPostAPI_EmptyURL(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, nil)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -96,7 +96,7 @@ func TestMethodPostAPI_InvalidJSON(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, nil)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -114,7 +114,7 @@ func TestMethodPostAPI_WrongMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/shorten", nil)
 	rec := httptest.NewRecorder()
 
-	MethodPostAPI(cfg, storage, nil)(rec, req)
+	MethodPostAPI(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))

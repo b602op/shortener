@@ -7,6 +7,7 @@ import (
 	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/config"
 	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/service"
 )
 
 // UserIDProvider описывает контракт источника идентификатора пользователя.
@@ -36,12 +37,15 @@ type AuditNotifier interface {
 }
 
 // Dependencies группирует все зависимости, необходимые для сборки роутера.
-// Обязательны Config и Store; AuthService, DeleteService и AuditService могут
-// быть равны nil, если соответствующая функциональность не используется.
+// Обязательны Config и Store; ShortenerService — общий слой бизнес-логики
+// (если nil, собирается поверх Store); AuthService, DeleteService и
+// AuditService могут быть равны nil, если соответствующая функциональность
+// не используется.
 type Dependencies struct {
-	Config        *config.Config
-	Store         repository.Store
-	AuthService   UserIDProvider
-	DeleteService URLDeleter
-	AuditService  AuditNotifier
+	Config           *config.Config
+	Store            repository.Store
+	ShortenerService *service.ShortenerService
+	AuthService      UserIDProvider
+	DeleteService    URLDeleter
+	AuditService     AuditNotifier
 }
