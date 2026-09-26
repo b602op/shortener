@@ -129,6 +129,7 @@ CONFIG=config.json ./shortener
 | `delete_buffer_size` | `DELETE_BUFFER_SIZE` | — | `100` |
 | `delete_flush_interval` | `DELETE_FLUSH_INTERVAL` | — | `1s` |
 | `delete_enqueue_timeout` | `DELETE_ENQUEUE_TIMEOUT` | — | `100ms` |
+| `trusted_subnet` | `TRUSTED_SUBNET` | `-t` / `--trusted-subnet` | `""` |
 
 > **Наносекунды:** поля `delete_flush_interval` и `delete_enqueue_timeout` — числа
 > в наносекундах (`1000000000` = 1 секунда, `100000000` = 100 миллисекунд).
@@ -208,3 +209,48 @@ ENABLE_HTTPS=true ./shortener
 и JSON-файл, включая явное выключение `-s=false` при `ENABLE_HTTPS=true`.
 
 Сертификаты не коммитятся в git (добавлены в `.gitignore`).
+
+## Эндпоинт /api/internal/stats
+
+Возвращает статистику сервиса:
+
+```json
+{
+  "urls": 42,
+  "users": 7
+}
+```
+
+- `urls` — количество сокращённых URL;
+- `users` — количество уникальных пользователей, которые сокращали URL.
+
+### Доступ
+
+Эндпоинт защищён проверкой IP клиента по доверенной подсети (CIDR).
+IP берётся из заголовка `X-Real-IP`.
+
+| Условие | Статус |
+|---|---|
+| IP в доверенной подсети | `200 OK` |
+| IP не в подсети | `403 Forbidden` |
+| Заголовка `X-Real-IP` нет | `403 Forbidden` |
+| Невалидный IP в `X-Real-IP` | `400 Bad Request` |
+| `trusted_subnet` пуст | `403 Forbidden` для всех |
+
+### Конфигурация
+
+| Источник | Ключ |
+|---|---|
+| JSON | `trusted_subnet` |
+| Env | `TRUSTED_SUBNET` |
+| Флаг | `-t` или `--trusted-subnet` |
+
+Пример:
+
+```bash
+./shortener -t 192.168.1.0/24
+
+TRUSTED_SUBNET=192.168.1.0/24 ./shortener
+```
+
+Невалидный CIDR в конфиге → сервер не стартует с понятной ошибкой.
