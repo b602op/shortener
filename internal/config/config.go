@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ const (
 	defaultFileStoragePath = "data/storage.json"
 	defaultTLSCertFile     = "./certs/cert.pem"
 	defaultTLSKeyFile      = "./certs/key.pem"
+	defaultGRPCAddress     = "localhost:9090"
 )
 
 // Config — настройки HTTP-сервера, базового адреса, хранилища, аудита
@@ -38,6 +40,15 @@ type Config struct {
 	DeleteBufferSize     int           `env:"DELETE_BUFFER_SIZE" envDefault:"100"`
 	DeleteFlushInterval  time.Duration `env:"DELETE_FLUSH_INTERVAL" envDefault:"1s"`
 	DeleteEnqueueTimeout time.Duration `env:"DELETE_ENQUEUE_TIMEOUT" envDefault:"100ms"`
+
+	// TrustedSubnet — CIDR доверенной подсети для /api/internal/stats.
+	TrustedSubnet string
+	// trustedSubnetNet — распарсенный CIDR, nil если подсеть не задана.
+	trustedSubnetNet *net.IPNet
+
+	// GRPCAddress — адрес gRPC-сервера (отдельный порт, параллельно с HTTP).
+	// Пустая строка — gRPC-сервер не запускается.
+	GRPCAddress string
 }
 
 // New читает флаги, переменные окружения и JSON-файл конфигурации,
@@ -86,6 +97,7 @@ func New() (*Config, error) {
 		DeleteBufferSize:     100,
 		DeleteFlushInterval:  time.Second,
 		DeleteEnqueueTimeout: 100 * time.Millisecond,
+		GRPCAddress:          defaultGRPCAddress,
 	}
 
 	// 2. Файл (перекрывает дефолты).
@@ -99,6 +111,16 @@ func New() (*Config, error) {
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+
+	// Парсим CIDR доверенной подсети, если задан.
+	// Невалидный CIDR — критическая ошибка конфигурации: fail early.
+	if cfg.TrustedSubnet != "" {
+		_, parsedNet, err := net.ParseCIDR(cfg.TrustedSubnet)
+		if err != nil {
+			return nil, fmt.Errorf("невалидный trusted_subnet %q: %w", cfg.TrustedSubnet, err)
+		}
+		cfg.trustedSubnetNet = parsedNet
 	}
 
 	// Выбираем хранилище: PostgreSQL → файл → память
@@ -145,17 +167,20 @@ func (c *Config) createStore() (repository.Store, error) {
 
 // flagValues — значения флагов для применения.
 type flagValues struct {
-	serverAddress   string
-	baseURL         string
-	fileStoragePath string
-	databaseDSN     string
-	auditFile       string
-	auditURL        string
-	enableHTTPS     bool
-	tlsCert         string
-	tlsKey          string
-	configPath      string
-	configPathLong  string
+	serverAddress     string
+	baseURL           string
+	fileStoragePath   string
+	databaseDSN       string
+	auditFile         string
+	auditURL          string
+	enableHTTPS       bool
+	tlsCert           string
+	tlsKey            string
+	configPath        string
+	configPathLong    string
+	trustedSubnet     string
+	trustedSubnetLong string
+	grpcAddress       string
 }
 
 // parseFlags регистрирует флаги в fs, парсит args и возвращает значения флагов
@@ -173,23 +198,29 @@ func parseFlags(fs *flag.FlagSet, args []string) (flagValues, map[string]bool) {
 	tlsKey := fs.String("tls-key", "", "путь к TLS-ключу")
 	configPath := fs.String("c", "", "путь к JSON-файлу конфигурации")
 	configPathLong := fs.String("config", "", "путь к JSON-файлу конфигурации (длинная форма)")
+	trustedSubnet := fs.String("t", "", "CIDR доверенной подсети")
+	trustedSubnetLong := fs.String("trusted-subnet", "", "CIDR доверенной подсети (длинная форма)")
+	grpcAddress := fs.String("g", "", "адрес gRPC-сервера (пустая строка — отключить gRPC)")
 
 	// Для flag.CommandLine (ExitOnError) некорректные аргументы завершают процесс,
 	// для тестовых FlagSet (ContinueOnError) ошибка парсинга просто игнорируется.
 	_ = fs.Parse(args)
 
 	values := flagValues{
-		serverAddress:   *serverAddress,
-		baseURL:         *baseURL,
-		fileStoragePath: *fileStoragePath,
-		databaseDSN:     *databaseDSN,
-		auditFile:       *auditFile,
-		auditURL:        *auditURL,
-		enableHTTPS:     *enableHTTPS,
-		tlsCert:         *tlsCert,
-		tlsKey:          *tlsKey,
-		configPath:      *configPath,
-		configPathLong:  *configPathLong,
+		serverAddress:     *serverAddress,
+		baseURL:           *baseURL,
+		fileStoragePath:   *fileStoragePath,
+		databaseDSN:       *databaseDSN,
+		auditFile:         *auditFile,
+		auditURL:          *auditURL,
+		enableHTTPS:       *enableHTTPS,
+		tlsCert:           *tlsCert,
+		tlsKey:            *tlsKey,
+		configPath:        *configPath,
+		configPathLong:    *configPathLong,
+		trustedSubnet:     *trustedSubnet,
+		trustedSubnetLong: *trustedSubnetLong,
+		grpcAddress:       *grpcAddress,
 	}
 
 	return values, flagWasSet(fs)
@@ -233,6 +264,15 @@ func applyFlagConfig(cfg *Config, wasSet map[string]bool, values flagValues) {
 	}
 	if wasSet["tls-key"] {
 		cfg.TLSKeyFile = values.tlsKey
+	}
+	if wasSet["t"] {
+		cfg.TrustedSubnet = values.trustedSubnet
+	} else if wasSet["trusted-subnet"] {
+		cfg.TrustedSubnet = values.trustedSubnetLong
+	}
+	// Явный -g "" отключает gRPC-сервер, перекрывая дефолт.
+	if wasSet["g"] {
+		cfg.GRPCAddress = values.grpcAddress
 	}
 }
 
@@ -280,6 +320,12 @@ func applyFileConfig(cfg *Config, fc *FileConfig) {
 	if fc.DeleteEnqueueTimeout != nil {
 		cfg.DeleteEnqueueTimeout = *fc.DeleteEnqueueTimeout
 	}
+	if fc.TrustedSubnet != "" {
+		cfg.TrustedSubnet = fc.TrustedSubnet
+	}
+	if fc.GRPCAddress != "" {
+		cfg.GRPCAddress = fc.GRPCAddress
+	}
 }
 
 // applyEnvConfig применяет env-переменные (перекрывают файл).
@@ -317,6 +363,13 @@ func applyEnvConfig(cfg *Config) {
 	cfg.DeleteBufferSize = getEnvInt("DELETE_BUFFER_SIZE", cfg.DeleteBufferSize)
 	cfg.DeleteFlushInterval = getEnvDuration("DELETE_FLUSH_INTERVAL", cfg.DeleteFlushInterval)
 	cfg.DeleteEnqueueTimeout = getEnvDuration("DELETE_ENQUEUE_TIMEOUT", cfg.DeleteEnqueueTimeout)
+
+	if v := os.Getenv("TRUSTED_SUBNET"); v != "" {
+		cfg.TrustedSubnet = v
+	}
+	if v := os.Getenv("GRPC_ADDRESS"); v != "" {
+		cfg.GRPCAddress = v
+	}
 }
 
 // parseBoolEnv читает переменную окружения как bool.
@@ -433,4 +486,21 @@ func (c *Config) GetTLSCertFile() string {
 // GetTLSKeyFile возвращает путь к TLS-ключу.
 func (c *Config) GetTLSKeyFile() string {
 	return c.TLSKeyFile
+}
+
+// GetTrustedSubnet возвращает CIDR доверенной подсети (пустая строка, если не задана).
+func (c *Config) GetTrustedSubnet() string {
+	return c.TrustedSubnet
+}
+
+// TrustedSubnetNet возвращает распарсенную доверенную подсеть.
+// nil — если подсеть не задана (доступ к /api/internal/stats запрещён всем).
+func (c *Config) TrustedSubnetNet() *net.IPNet {
+	return c.trustedSubnetNet
+}
+
+// GetGRPCAddress возвращает адрес gRPC-сервера.
+// Пустая строка — gRPC-сервер не запускается.
+func (c *Config) GetGRPCAddress() string {
+	return c.GRPCAddress
 }

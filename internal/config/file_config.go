@@ -34,6 +34,12 @@ type FileConfig struct {
 	DeleteBufferSize     *int           `json:"delete_buffer_size"`
 	DeleteFlushInterval  *time.Duration `json:"delete_flush_interval"`
 	DeleteEnqueueTimeout *time.Duration `json:"delete_enqueue_timeout"`
+
+	// Доверенная подсеть для /api/internal/stats (CIDR, например "192.168.1.0/24").
+	TrustedSubnet string `json:"trusted_subnet"`
+
+	// GRPCAddress — адрес gRPC-сервера (отдельный порт, параллельно с HTTP).
+	GRPCAddress string `json:"grpc_address"`
 }
 
 // loadFileConfig читает и парсит JSON-файл конфигурации.

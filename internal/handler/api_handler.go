@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,8 +9,8 @@ import (
 
 	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
-	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/domain"
+	"github.com/b602op/shortener/internal/service"
 )
 
 // ShortenRequest — тело JSON-запроса к API сокращения.
@@ -26,10 +24,10 @@ type ShortenResponse struct {
 }
 
 // MethodPostAPI возвращает обработчик POST /api/shorten с JSON-телом.
-// Ожидает объект с полем url; короткий адрес — первые 4 байта SHA-256.
+// Ожидает объект с полем url; валидация и сохранение — в общем сервисе.
 // Ответ: 201 с полем result, 409 с существующим адресом при дубликате,
-// 400 при некорректном JSON или пустом url, 500 при ошибке сохранения.
-func MethodPostAPI(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
+// 400 при некорректном JSON, пустом или невалидном url, 500 при ошибке сохранения.
+func MethodPostAPI(svc *service.ShortenerService, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос к API", "uri", req.RequestURI)
 
@@ -59,21 +57,21 @@ func MethodPostAPI(cfg *config.Config, store repository.Store, auditService Audi
 
 		slog.Debug("URL для сокращения", "url", shortenReq.URL)
 
-		hash := sha256.Sum256([]byte(shortenReq.URL))
-		shortHash := hex.EncodeToString(hash[:4])
-
-		shortURL := cfg.GetBaseURL() + "/" + shortHash
-
 		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
 		userID, _ := auth.GetUserIDFromContext(req.Context())
 
-		// Сохраняем через переданный store
-		if err = store.Insert(userID, shortenReq.URL, shortHash); err != nil {
-			if errors.Is(err, repository.ErrDuplicateURL) {
+		// Валидация и сохранение — в общем сервисе
+		shortURL, err := svc.ShortenURL(req.Context(), userID, shortenReq.URL)
+		if err != nil {
+			if errors.Is(err, domain.ErrDuplicateURL) {
 				slog.Warn("Дубликат URL", "url", shortenReq.URL)
 				res.Header().Set("Content-Type", "application/json")
 				res.WriteHeader(http.StatusConflict)
-				_ = json.NewEncoder(res).Encode(ShortenResponse{Result: cfg.GetBaseURL() + "/" + shortHash})
+				_ = json.NewEncoder(res).Encode(ShortenResponse{Result: shortURL})
+				return
+			}
+			if errors.Is(err, domain.ErrInvalidURL) {
+				respondWithError(res, "Невалидный URL", http.StatusBadRequest)
 				return
 			}
 			slog.Error("Ошибка сохранения", "error", err)

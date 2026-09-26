@@ -24,7 +24,7 @@ func TestMethodGet_Basic(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/"+testShort, nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage, nil)(rec, req)
+	MethodGet(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 	location := rec.Header().Get("Location")
@@ -41,7 +41,7 @@ func TestMethodGet_WrongMethod(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/a1b2c3d4", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage, nil)(rec, req)
+	MethodGet(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -59,7 +59,7 @@ func TestMethodGet_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/unknown123", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage, nil)(rec, req)
+	MethodGet(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -77,7 +77,7 @@ func TestMethodGet_EmptyPath(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
-	MethodGet(cfg, storage, nil)(rec, req)
+	MethodGet(newTestService(cfg, storage), nil)(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))

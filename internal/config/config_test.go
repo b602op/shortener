@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -500,4 +501,162 @@ func TestHTTPSGetters(t *testing.T) {
 	assert.True(t, cfg.GetEnableHTTPS())
 	assert.Equal(t, "/tmp/cert.pem", cfg.GetTLSCertFile())
 	assert.Equal(t, "/tmp/key.pem", cfg.GetTLSKeyFile())
+}
+
+func TestTrustedSubnet_FileConfig(t *testing.T) {
+	// Парсинг trusted_subnet из JSON
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"trusted_subnet": "192.168.1.0/24"}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+}
+
+func TestTrustedSubnet_ApplyFileConfig(t *testing.T) {
+	// Файл перекрывает дефолт
+	cfg := &Config{}
+	applyFileConfig(cfg, &FileConfig{TrustedSubnet: "10.0.0.0/8"})
+	assert.Equal(t, "10.0.0.0/8", cfg.TrustedSubnet)
+
+	// Пустое поле в файле не перекрывает
+	cfg = &Config{TrustedSubnet: "192.168.1.0/24"}
+	applyFileConfig(cfg, &FileConfig{})
+	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+}
+
+func TestTrustedSubnet_ApplyEnvConfig(t *testing.T) {
+	// Env перекрывает файл
+	t.Setenv("TRUSTED_SUBNET", "172.16.0.0/12")
+
+	cfg := &Config{TrustedSubnet: "192.168.1.0/24"}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "172.16.0.0/12", cfg.TrustedSubnet)
+
+	// Пустой env не перекрывает
+	t.Setenv("TRUSTED_SUBNET", "")
+	cfg = &Config{TrustedSubnet: "192.168.1.0/24"}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+}
+
+func TestTrustedSubnet_Flags(t *testing.T) {
+	// Короткий флаг -t
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-t", "192.168.1.0/24"})
+	assert.Contains(t, wasSet, "t")
+	assert.Equal(t, "192.168.1.0/24", values.trustedSubnet)
+
+	cfg := &Config{}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+
+	// Длинный флаг --trusted-subnet
+	fs = flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet = parseFlags(fs, []string{"--trusted-subnet", "10.0.0.0/8"})
+	assert.Contains(t, wasSet, "trusted-subnet")
+	assert.Equal(t, "10.0.0.0/8", values.trustedSubnetLong)
+
+	cfg = &Config{}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Equal(t, "10.0.0.0/8", cfg.TrustedSubnet)
+
+	// Флаги не заданы — конфиг не меняется
+	cfg = &Config{TrustedSubnet: "env-value"}
+	applyFlagConfig(cfg, map[string]bool{}, flagValues{})
+	assert.Equal(t, "env-value", cfg.TrustedSubnet)
+}
+
+func TestTrustedSubnet_Priority(t *testing.T) {
+	// Приоритет: флаг > env > файл
+	t.Setenv("TRUSTED_SUBNET", "172.16.0.0/12")
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-t", "192.168.1.0/24"})
+
+	cfg := &Config{TrustedSubnet: "10.0.0.0/8"} // значение из файла
+	applyEnvConfig(cfg)                         // env перекрывает файл
+	assert.Equal(t, "172.16.0.0/12", cfg.TrustedSubnet)
+
+	applyFlagConfig(cfg, wasSet, values) // флаг перекрывает всё
+	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
+}
+
+func TestTrustedSubnet_CIDRValidation(t *testing.T) {
+	// Валидный CIDR парсится и сохраняется
+	cfg := &Config{TrustedSubnet: "192.168.1.0/24"}
+	_, parsed, err := net.ParseCIDR(cfg.TrustedSubnet)
+	require.NoError(t, err)
+	cfg.trustedSubnetNet = parsed
+
+	require.NotNil(t, cfg.TrustedSubnetNet())
+	assert.True(t, cfg.TrustedSubnetNet().Contains(net.ParseIP("192.168.1.5")))
+	assert.False(t, cfg.TrustedSubnetNet().Contains(net.ParseIP("10.0.0.5")))
+
+	// Пустая подсеть — nil
+	cfg = &Config{}
+	assert.Nil(t, cfg.TrustedSubnetNet())
+
+	// Невалидный CIDR — ошибка парсинга
+	_, _, err = net.ParseCIDR("not-a-cidr")
+	assert.Error(t, err)
+}
+
+func TestTrustedSubnet_InvalidCIDRRejected(t *testing.T) {
+	// Невалидный CIDR не проходит парсинг — сервис должен падать на старте
+	for _, invalid := range []string{"not-a-cidr", "192.168.1.0", "192.168.1.0/33", "999.0.0.0/8"} {
+		_, _, err := net.ParseCIDR(invalid)
+		assert.Error(t, err, "CIDR %q должен быть невалидным", invalid)
+	}
+}
+
+func TestGRPCAddress_DefaultAndSources(t *testing.T) {
+	// Дефолт — localhost:9090
+	cfg := &Config{GRPCAddress: defaultGRPCAddress}
+	assert.Equal(t, "localhost:9090", cfg.GetGRPCAddress())
+
+	// Env перекрывает дефолт
+	t.Setenv("GRPC_ADDRESS", "localhost:9191")
+	cfg = &Config{GRPCAddress: defaultGRPCAddress}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "localhost:9191", cfg.GRPCAddress)
+
+	// Пустой env не перекрывает
+	t.Setenv("GRPC_ADDRESS", "")
+	cfg = &Config{GRPCAddress: "localhost:9090"}
+	applyEnvConfig(cfg)
+	assert.Equal(t, "localhost:9090", cfg.GRPCAddress)
+
+	// Файл перекрывает дефолт
+	cfg = &Config{GRPCAddress: defaultGRPCAddress}
+	applyFileConfig(cfg, &FileConfig{GRPCAddress: "localhost:9292"})
+	assert.Equal(t, "localhost:9292", cfg.GRPCAddress)
+
+	// Явный флаг -g "" отключает gRPC даже при заданном env
+	t.Setenv("GRPC_ADDRESS", "localhost:9191")
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet := parseFlags(fs, []string{"-g", ""})
+	cfg = &Config{GRPCAddress: "localhost:9191"}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Empty(t, cfg.GetGRPCAddress())
+
+	// Флаг -g перекрывает env
+	fs = flag.NewFlagSet("test", flag.ContinueOnError)
+	values, wasSet = parseFlags(fs, []string{"-g", "localhost:9393"})
+	assert.Contains(t, wasSet, "g")
+	cfg = &Config{GRPCAddress: "localhost:9191"}
+	applyFlagConfig(cfg, wasSet, values)
+	assert.Equal(t, "localhost:9393", cfg.GRPCAddress)
+}
+
+func TestGRPCAddress_FileConfigParsing(t *testing.T) {
+	// Парсинг grpc_address из JSON
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"grpc_address": "localhost:9494"}`), 0644))
+
+	cfg, err := loadFileConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "localhost:9494", cfg.GRPCAddress)
 }

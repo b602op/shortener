@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
 	"log/slog"
@@ -10,15 +8,15 @@ import (
 
 	"github.com/b602op/shortener/internal/audit"
 	"github.com/b602op/shortener/internal/auth"
-	"github.com/b602op/shortener/internal/config"
-	"github.com/b602op/shortener/internal/repository"
+	"github.com/b602op/shortener/internal/domain"
+	"github.com/b602op/shortener/internal/service"
 )
 
 // MethodPost возвращает обработчик POST / для тела в формате text/plain.
-// Тело запроса считается исходным URL, короткий адрес — первые 4 байта SHA-256.
+// Тело запроса считается исходным URL; валидация и сохранение — в общем сервисе.
 // Ответ: 201 с полным коротким URL, 409 с уже существующим адресом при
-// дубликате, 400 при пустом теле или ошибке чтения, 500 при ошибке сохранения.
-func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNotifier) http.HandlerFunc {
+// дубликате, 400 при пустом теле или невалидном URL, 500 при ошибке сохранения.
+func MethodPost(svc *service.ShortenerService, auditService AuditNotifier) http.HandlerFunc {
 	return func(res http.ResponseWriter, req *http.Request) {
 		slog.Info("Получен POST запрос", "uri", req.RequestURI)
 
@@ -47,17 +45,18 @@ func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNo
 		// Извлекаем userID из контекста (устанавливается AuthMiddleware)
 		userID, _ := auth.GetUserIDFromContext(req.Context())
 
-		// Генерируем короткий URL
-		hash := sha256.Sum256([]byte(originalURL))
-		shortHash := hex.EncodeToString(hash[:4])
-
-		// Сохраняем только один раз
-		if err = store.Insert(userID, originalURL, shortHash); err != nil {
-			if errors.Is(err, repository.ErrDuplicateURL) {
+		// Валидация и сохранение — в общем сервисе
+		shortURL, err := svc.ShortenURL(req.Context(), userID, originalURL)
+		if err != nil {
+			if errors.Is(err, domain.ErrDuplicateURL) {
 				slog.Warn("Дубликат URL", "url", originalURL)
 				res.Header().Set("Content-Type", "text/plain")
 				res.WriteHeader(http.StatusConflict)
-				_, _ = res.Write([]byte(cfg.GetBaseURL() + "/" + shortHash))
+				_, _ = res.Write([]byte(shortURL))
+				return
+			}
+			if errors.Is(err, domain.ErrInvalidURL) {
+				respondWithError(res, "Невалидный URL", http.StatusBadRequest)
 				return
 			}
 			slog.Error("Ошибка сохранения", "error", err)
@@ -66,8 +65,6 @@ func MethodPost(cfg *config.Config, store repository.Store, auditService AuditNo
 		}
 
 		notifyAudit(req, auditService, audit.ActionShorten, originalURL)
-
-		shortURL := cfg.GetBaseURL() + "/" + shortHash
 
 		slog.Info("Сокращённый URL создан", "shortURL", shortURL)
 

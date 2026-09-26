@@ -49,3 +49,6 @@ certs/*.pem
 
 # Реальный конфиг (не коммитить, коммитится только config.example.json)
 config.json
+
+# Инструменты кодогенерации (protoc и well-known типы)
+.tools/
